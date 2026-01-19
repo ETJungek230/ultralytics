@@ -726,7 +726,7 @@ class BaseTrainer:
             self.args.data = convert_ndjson_to_yolo_if_needed(self.args.data)
 
             # Task-specific dataset checking
-            if self.args.task == "classify":
+            if self.args.task == "classify" or self.args.task == "multiclassify":
                 data = check_cls_dataset(self.args.data)
             elif str(self.args.data).rsplit(".", 1)[-1] in {"yaml", "yml"} or self.args.task in {
                 "detect",

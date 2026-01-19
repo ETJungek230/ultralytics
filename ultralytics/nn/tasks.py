@@ -73,6 +73,7 @@ from ultralytics.nn.modules import (
     YOLOESegment,
     YOLOESegment26,
     v10Detect,
+    MultiClassify,
 )
 from ultralytics.utils import (
     DEFAULT_CFG_DICT,
@@ -1846,6 +1847,7 @@ def parse_model(d, ch, verbose=True):
             SCDown,
             C2fCIB,
             A2C2f,
+            MultiClassify,
         }
     )
     repeat_modules = frozenset(  # modules with 'repeat' arguments
@@ -2025,7 +2027,7 @@ def guess_model_task(model):
     def cfg2task(cfg):
         """Guess from YAML dictionary."""
         m = cfg["head"][-1][-2].lower()  # output module name
-        if m in {"classify", "classifier", "cls", "fc"}:
+        if m in {"classify", "classifier", "cls", "fc", "multiclassify"}:
             return "classify"
         if "detect" in m:
             return "detect"
@@ -2055,7 +2057,7 @@ def guess_model_task(model):
                 return "semantic"
             elif isinstance(m, (Segment, YOLOESegment)):
                 return "segment"
-            elif isinstance(m, Classify):
+            elif isinstance(m, (Classify, MultiClassify)):
                 return "classify"
             elif isinstance(m, Pose):
                 return "pose"

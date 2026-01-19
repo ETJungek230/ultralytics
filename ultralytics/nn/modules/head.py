@@ -23,6 +23,7 @@ from .utils import bias_init_with_prob, linear_init
 __all__ = (
     "OBB",
     "Classify",
+    "MultiClassify",
     "Detect",
     "Pose",
     "RTDETRDecoder",
@@ -144,7 +145,7 @@ class Detect(nn.Module):
         self._end2end = value
 
     def forward_head(
-        self, x: list[torch.Tensor], box_head: torch.nn.Module = None, cls_head: torch.nn.Module = None
+            self, x: list[torch.Tensor], box_head: torch.nn.Module = None, cls_head: torch.nn.Module = None
     ) -> dict[str, torch.Tensor]:
         """Concatenates and returns predicted bounding boxes and class probabilities."""
         if box_head is None or cls_head is None:  # for fused inference
@@ -155,7 +156,7 @@ class Detect(nn.Module):
         return dict(boxes=boxes, scores=scores, feats=x)
 
     def forward(
-        self, x: list[torch.Tensor]
+            self, x: list[torch.Tensor]
     ) -> dict[str, torch.Tensor] | torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """Concatenates and returns predicted bounding boxes and class probabilities."""
         preds = self.forward_head(x, **self.one2many)
@@ -335,7 +336,8 @@ class Segment(Detect):
         return torch.cat([preds, x["mask_coefficient"]], dim=1)
 
     def forward_head(
-        self, x: list[torch.Tensor], box_head: torch.nn.Module, cls_head: torch.nn.Module, mask_head: torch.nn.Module
+            self, x: list[torch.Tensor], box_head: torch.nn.Module, cls_head: torch.nn.Module,
+            mask_head: torch.nn.Module
     ) -> dict[str, torch.Tensor]:
         """Concatenates and returns predicted bounding boxes, class probabilities, and mask coefficients."""
         preds = super().forward_head(x, box_head, cls_head)
@@ -482,7 +484,8 @@ class OBB(Detect):
         return torch.cat([preds, x["angle"]], dim=1)
 
     def forward_head(
-        self, x: list[torch.Tensor], box_head: torch.nn.Module, cls_head: torch.nn.Module, angle_head: torch.nn.Module
+            self, x: list[torch.Tensor], box_head: torch.nn.Module, cls_head: torch.nn.Module,
+            angle_head: torch.nn.Module
     ) -> dict[str, torch.Tensor]:
         """Concatenates and returns predicted bounding boxes, class probabilities, and angles."""
         preds = super().forward_head(x, box_head, cls_head)
@@ -542,7 +545,8 @@ class OBB26(OBB):
     """
 
     def forward_head(
-        self, x: list[torch.Tensor], box_head: torch.nn.Module, cls_head: torch.nn.Module, angle_head: torch.nn.Module
+            self, x: list[torch.Tensor], box_head: torch.nn.Module, cls_head: torch.nn.Module,
+            angle_head: torch.nn.Module
     ) -> dict[str, torch.Tensor]:
         """Concatenates and returns predicted bounding boxes, class probabilities, and raw angles."""
         preds = Detect.forward_head(self, x, box_head, cls_head)
@@ -611,7 +615,8 @@ class Pose(Detect):
         return torch.cat([preds, self.kpts_decode(x["kpts"])], dim=1)
 
     def forward_head(
-        self, x: list[torch.Tensor], box_head: torch.nn.Module, cls_head: torch.nn.Module, pose_head: torch.nn.Module
+            self, x: list[torch.Tensor], box_head: torch.nn.Module, cls_head: torch.nn.Module,
+            pose_head: torch.nn.Module
     ) -> dict[str, torch.Tensor]:
         """Concatenates and returns predicted bounding boxes, class probabilities, and keypoints."""
         preds = super().forward_head(x, box_head, cls_head)
@@ -732,13 +737,13 @@ class Pose26(Pose):
         )
 
     def forward_head(
-        self,
-        x: list[torch.Tensor],
-        box_head: torch.nn.Module,
-        cls_head: torch.nn.Module,
-        pose_head: torch.nn.Module,
-        kpts_head: torch.nn.Module,
-        kpts_sigma_head: torch.nn.Module,
+            self,
+            x: list[torch.Tensor],
+            box_head: torch.nn.Module,
+            cls_head: torch.nn.Module,
+            pose_head: torch.nn.Module,
+            kpts_head: torch.nn.Module,
+            kpts_sigma_head: torch.nn.Module,
     ) -> dict[str, torch.Tensor]:
         """Concatenates and returns predicted bounding boxes, class probabilities, and keypoints."""
         preds = Detect.forward_head(self, x, box_head, cls_head)
@@ -833,6 +838,52 @@ class Classify(nn.Module):
         return y if self.export else (y, x)
 
 
+class MultiClassify(nn.Module):
+    """YOLO multi-label classification head, i.e. x(b,c1,20,20) to x(b,c2).
+
+    Attributes:
+        export (bool): Export mode flag.
+        conv (Conv): Convolutional layer for feature transformation.
+        pool (nn.AdaptiveAvgPool2d): Global average pooling layer.
+        drop (nn.Dropout): Dropout layer for regularization.
+        linear (nn.Linear): Linear layer for final classification.
+
+    Methods:
+        forward: Perform forward pass of the YOLO model on input image data.
+    """
+
+    export = False  # export mode
+
+    def __init__(self, c1: int, c2: int, k: int = 1, s: int = 1, p: int | None = None, g: int = 1):
+        """Initialize YOLO classification head to transform input tensor from (b,c1,20,20) to (b,c2) shape.
+
+        Args:
+            c1 (int): Number of input channels.
+            c2 (int): Number of output classes.
+            k (int, optional): Kernel size.
+            s (int, optional): Stride.
+            p (int, optional): Padding.
+            g (int, optional): Groups.
+        """
+        super().__init__()
+        c_ = 1280  # efficientnet_b0 size
+        self.conv = Conv(c1, c_, k, s, p, g)
+        self.pool = nn.AdaptiveAvgPool2d(1)  # to x(b,c_,1,1)
+        self.drop = nn.Dropout(p=0.0, inplace=True)
+        self.linear = nn.Linear(c_, c2)  # to x(b,c2)
+        self.output_activate = nn.Sigmoid()
+
+    def forward(self, x: list[torch.Tensor] | torch.Tensor) -> torch.Tensor | tuple:
+        """Perform forward pass of the YOLO model on input image data."""
+        if isinstance(x, list):
+            x = torch.cat(x, 1)
+        x = self.linear(self.drop(self.pool(self.conv(x)).flatten(1)))
+        if self.training:
+            return x
+        y = self.output_activate(x)  # get final output
+        return y if self.export else (y, x)
+
+
 class WorldDetect(Detect):
     """Head for integrating YOLO detection models with semantic understanding from text embeddings.
 
@@ -856,13 +907,13 @@ class WorldDetect(Detect):
     """
 
     def __init__(
-        self,
-        nc: int = 80,
-        embed: int = 512,
-        with_bn: bool = False,
-        reg_max: int = 16,
-        end2end: bool = False,
-        ch: tuple = (),
+            self,
+            nc: int = 80,
+            embed: int = 512,
+            with_bn: bool = False,
+            reg_max: int = 16,
+            end2end: bool = False,
+            ch: tuple = (),
     ):
         """Initialize YOLO detection layer with nc classes and layer channels ch.
 
@@ -1003,7 +1054,7 @@ class YOLOEDetect(Detect):
     is_fused = False
 
     def __init__(
-        self, nc: int = 80, embed: int = 512, with_bn: bool = False, reg_max=16, end2end=False, ch: tuple = ()
+            self, nc: int = 80, embed: int = 512, with_bn: bool = False, reg_max=16, end2end=False, ch: tuple = ()
     ):
         """Initialize YOLO detection layer with nc classes and layer channels ch.
 
@@ -1173,14 +1224,14 @@ class YOLOEDetect(Detect):
     def bias_init(self):
         """Initialize Detect() biases, WARNING: requires stride availability."""
         for i, (a, b, c) in enumerate(
-            zip(self.one2many["box_head"], self.one2many["cls_head"], self.one2many["contrastive_head"])
+                zip(self.one2many["box_head"], self.one2many["cls_head"], self.one2many["contrastive_head"])
         ):
             a[-1].bias.data[:] = 2.0  # box
             b[-1].bias.data[:] = 0.0
             c.bias.data[:] = math.log(5 / self.nc / (640 / self.stride[i]) ** 2)
         if self.end2end:
             for i, (a, b, c) in enumerate(
-                zip(self.one2one["box_head"], self.one2one["cls_head"], self.one2one["contrastive_head"])
+                    zip(self.one2one["box_head"], self.one2one["cls_head"], self.one2one["contrastive_head"])
             ):
                 a[-1].bias.data[:] = 2.0  # box
                 b[-1].bias.data[:] = 0.0
@@ -1211,15 +1262,15 @@ class YOLOESegment(YOLOEDetect):
     """
 
     def __init__(
-        self,
-        nc: int = 80,
-        nm: int = 32,
-        npr: int = 256,
-        embed: int = 512,
-        with_bn: bool = False,
-        reg_max=16,
-        end2end=False,
-        ch: tuple = (),
+            self,
+            nc: int = 80,
+            nm: int = 32,
+            npr: int = 256,
+            embed: int = 512,
+            with_bn: bool = False,
+            reg_max=16,
+            end2end=False,
+            ch: tuple = (),
     ):
         """Initialize YOLOESegment with class count, mask parameters, and embedding dimensions.
 
@@ -1312,12 +1363,12 @@ class YOLOESegment(YOLOEDetect):
         return torch.cat([preds, x["mask_coefficient"]], dim=1)
 
     def forward_head(
-        self,
-        x: list[torch.Tensor],
-        box_head: torch.nn.Module,
-        cls_head: torch.nn.Module,
-        mask_head: torch.nn.Module,
-        contrastive_head: torch.nn.Module,
+            self,
+            x: list[torch.Tensor],
+            box_head: torch.nn.Module,
+            cls_head: torch.nn.Module,
+            mask_head: torch.nn.Module,
+            contrastive_head: torch.nn.Module,
     ) -> dict[str, torch.Tensor]:
         """Concatenates and returns predicted bounding boxes, class probabilities, and mask coefficients."""
         preds = super().forward_head(x, box_head, cls_head, contrastive_head)
@@ -1378,15 +1429,15 @@ class YOLOESegment26(YOLOESegment):
     """
 
     def __init__(
-        self,
-        nc: int = 80,
-        nm: int = 32,
-        npr: int = 256,
-        embed: int = 512,
-        with_bn: bool = False,
-        reg_max=16,
-        end2end=False,
-        ch: tuple = (),
+            self,
+            nc: int = 80,
+            nm: int = 32,
+            npr: int = 256,
+            embed: int = 512,
+            with_bn: bool = False,
+            reg_max=16,
+            end2end=False,
+            ch: tuple = (),
     ):
         """Initialize YOLOESegment26 with class count, mask parameters, and embedding dimensions."""
         YOLOEDetect.__init__(self, nc, embed, with_bn, reg_max, end2end, ch)
@@ -1463,23 +1514,23 @@ class RTDETRDecoder(nn.Module):
     dynamic = False
 
     def __init__(
-        self,
-        nc: int = 80,
-        ch: tuple = (512, 1024, 2048),
-        hd: int = 256,  # hidden dim
-        nq: int = 300,  # num queries
-        ndp: int = 4,  # num decoder points
-        nh: int = 8,  # num head
-        ndl: int = 6,  # num decoder layers
-        d_ffn: int = 1024,  # dim of feedforward
-        dropout: float = 0.0,
-        act: nn.Module = nn.ReLU(),
-        eval_idx: int = -1,
-        # Training args
-        nd: int = 100,  # num denoising
-        label_noise_ratio: float = 0.5,
-        box_noise_scale: float = 1.0,
-        learnt_init_query: bool = False,
+            self,
+            nc: int = 80,
+            ch: tuple = (512, 1024, 2048),
+            hd: int = 256,  # hidden dim
+            nq: int = 300,  # num queries
+            ndp: int = 4,  # num decoder points
+            nh: int = 8,  # num head
+            ndl: int = 6,  # num decoder layers
+            d_ffn: int = 1024,  # dim of feedforward
+            dropout: float = 0.0,
+            act: nn.Module = nn.ReLU(),
+            eval_idx: int = -1,
+            # Training args
+            nd: int = 100,  # num denoising
+            label_noise_ratio: float = 0.5,
+            box_noise_scale: float = 1.0,
+            learnt_init_query: bool = False,
     ):
         """Initialize the RTDETRDecoder module with the given parameters.
 
@@ -1611,11 +1662,11 @@ class RTDETRDecoder(nn.Module):
 
     @staticmethod
     def _generate_anchors(
-        shapes: list[list[int]],
-        grid_size: float = 0.05,
-        dtype: torch.dtype = torch.float32,
-        device: str = "cpu",
-        eps: float = 1e-2,
+            shapes: list[list[int]],
+            grid_size: float = 0.05,
+            dtype: torch.dtype = torch.float32,
+            device: str = "cpu",
+            eps: float = 1e-2,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate anchor bounding boxes for given shapes with specific grid size and validate them.
 
@@ -1639,7 +1690,7 @@ class RTDETRDecoder(nn.Module):
 
             valid_WH = torch.tensor([w, h], dtype=dtype, device=device)
             grid_xy = (grid_xy.unsqueeze(0) + 0.5) / valid_WH  # (1, h, w, 2)
-            wh = torch.ones_like(grid_xy, dtype=dtype, device=device) * grid_size * (2.0**i)
+            wh = torch.ones_like(grid_xy, dtype=dtype, device=device) * grid_size * (2.0 ** i)
             anchors.append(torch.cat([grid_xy, wh], -1).view(-1, h * w, 4))  # (1, h*w, 4)
 
         anchors = torch.cat(anchors, 1)  # (1, h*w*nl, 4)
@@ -1675,11 +1726,11 @@ class RTDETRDecoder(nn.Module):
         return feats, shapes
 
     def _get_decoder_input(
-        self,
-        feats: torch.Tensor,
-        shapes: list[list[int]],
-        dn_embed: torch.Tensor | None = None,
-        dn_bbox: torch.Tensor | None = None,
+            self,
+            feats: torch.Tensor,
+            shapes: list[list[int]],
+            dn_embed: torch.Tensor | None = None,
+            dn_bbox: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Generate and prepare the input required for the decoder from the provided features and shapes.
 
