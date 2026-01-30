@@ -198,6 +198,9 @@ class BaseTrainer:
         self.plot_idx = [0, 1, 2]
         self.nan_recovery_attempts = 0
 
+        # Initialize bgr to grayscale weights
+        self.bgr_weights = torch.tensor([0.114, 0.587, 0.299]).to(device=self.device)
+
     def add_callback(self, event: str, callback):
         """Append the given callback to the event's callback list."""
         self.callbacks[event].append(callback)
@@ -451,6 +454,10 @@ class BaseTrainer:
                 # Forward
                 try:
                     with autocast(self.amp):
+                        if self.model.yaml.get('channels', 3) == 1 and self.data['channels'] == 3:
+                            batch["img"] = (
+                                    batch["img"].to(device=self.device) * self.bgr_weights.view(1, 3, 1, 1)
+                            ).sum(dim=1, keepdim=True)
                         batch = self.preprocess_batch(batch)
                         if self.args.compile:
                             # Decouple inference and loss calculations for improved compile performance

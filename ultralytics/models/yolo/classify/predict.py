@@ -58,16 +58,26 @@ class ClassificationPredictor(BasePredictor):
             if hasattr(self.model.model, "transforms") and hasattr(self.model.model.transforms.transforms[0], "size")
             else False
         )
-        self.transforms = (
-            classify_transforms(self.imgsz) if updated or self.model.format != "pt" else self.model.model.transforms
-        )
+        if hasattr(self.model.model, "yaml"):
+            self.ch = self.model.model.yaml.get("channels", 3)
+        if self.ch == 3:
+            self.transforms = (
+                classify_transforms(self.imgsz) if updated or self.model.format != "pt" else self.model.model.transforms
+            )
+        else:
+            self.transforms = classify_transforms(self.imgsz, mean=[0] * self.ch, std=[1] * self.ch)
 
     def preprocess(self, img):
         """Convert input images to model-compatible tensor format with appropriate normalization."""
         if not isinstance(img, torch.Tensor):
-            img = torch.stack(
-                [self.transforms(Image.fromarray(cv2.cvtColor(im, cv2.COLOR_BGR2RGB))) for im in img], dim=0
-            )
+            if self.ch == 3:
+                img = torch.stack(
+                    [self.transforms(Image.fromarray(cv2.cvtColor(im, cv2.COLOR_BGR2RGB))) for im in img], dim=0
+                )
+            else:
+                img = torch.stack(
+                    [self.transforms(Image.fromarray(im.reshape(im.shape[:2]))) for im in img], dim=0
+                )
         img = (img if isinstance(img, torch.Tensor) else torch.from_numpy(img)).to(self.model.device)
         return img.half() if self.model.fp16 else img.float()  # Convert uint8 to fp16/32
 

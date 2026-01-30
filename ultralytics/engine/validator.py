@@ -218,7 +218,8 @@ class BaseValidator:
             model.eval()
             if self.args.compile:
                 model = attempt_compile(model, device=self.device)
-            model.warmup(imgsz=(1 if pt else self.args.batch, self.data["channels"], imgsz, imgsz))  # warmup
+            # model.warmup(imgsz=(1 if pt else self.args.batch, self.data["channels"], imgsz, imgsz))  # warmup
+            model.warmup(imgsz=(1 if pt else self.args.batch, model.model.yaml.get('channels', 3), imgsz, imgsz))
 
         self.run_callbacks("on_val_start")
         dt = (
@@ -235,6 +236,13 @@ class BaseValidator:
             self.batch_i = batch_i
             # Preprocess
             with dt[0]:
+                model_channels = model.yaml.get('channels', 3) if self.training else model.model.yaml.get('channels', 3)
+                if model_channels == 1 and self.data["channels"] == 3:
+                    # Before preprocess, transform the batch from bgr to grayscale
+                    bgr_weights = torch.tensor([0.114, 0.587, 0.299]).to(device=self.device)
+                    batch["img"] = (
+                            batch["img"].to(device=self.device) * bgr_weights.view(1, 3, 1, 1)
+                    ).sum(dim=1, keepdim=True)
                 batch = self.preprocess(batch)
 
             with autocast(self.training and self.args.quantize == 16, device=self.device.type):
@@ -294,7 +302,7 @@ class BaseValidator:
             return stats
 
     def match_predictions(
-        self, pred_classes: torch.Tensor, true_classes: torch.Tensor, iou: torch.Tensor, use_scipy: bool = False
+            self, pred_classes: torch.Tensor, true_classes: torch.Tensor, iou: torch.Tensor, use_scipy: bool = False
     ) -> torch.Tensor:
         """Match predictions to ground truth objects using IoU.
 

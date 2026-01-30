@@ -150,6 +150,8 @@ class BasePredictor:
         self.callbacks = _callbacks or callbacks.get_default_callbacks()
         self.txt_path = None
         self._lock = threading.Lock()  # for automatic thread-safe inference
+        # Initialize the number of channels in the image if specified by the user
+        self.ch = self.args.get("ch", 3)
         callbacks.add_integration_callbacks(self)
 
     def preprocess(self, im: torch.Tensor | list[np.ndarray]) -> torch.Tensor:
@@ -169,6 +171,9 @@ class BasePredictor:
             im = im.transpose((0, 3, 1, 2))  # BHWC to BCHW, (n, 3, h, w)
             im = np.ascontiguousarray(im)  # contiguous
             im = torch.from_numpy(im)
+            if self.ch == 1:
+                # Transform the input img into a (n, 1, h, w) torch tensor
+                im = im.unsqueeze(1)
 
         im = im.to(self.device)
         im = im.half() if self.model.fp16 else im.float()  # uint8 to fp16/32
