@@ -2194,7 +2194,7 @@ def guess_model_scale(model_path):
         (str): The size character of the model's scale (n, s, m, l, or x), or empty string if not found.
     """
     try:
-        return re.search(r"yolo(e-)?[v]?\d+([nslmx])", Path(model_path).stem).group(2)
+        return re.search(r"yolo(e-)?[v]?\d+([cnslmx])", Path(model_path).stem).group(2)
     except AttributeError:
         return ""
 
