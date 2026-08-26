@@ -1,5 +1,12 @@
 ---
+title: COCO12-Formats Detection Dataset
 comments: true
+creator:
+    name: Ultralytics
+    url: https://www.ultralytics.com
+license:
+    name: CC-BY-4.0
+    url: https://cocodataset.org/#termsofuse
 description: Explore the Ultralytics COCO12-Formats dataset, a test dataset featuring 12 supported image formats (AVIF, BMP, DNG, HEIC, JP2, JPEG, JPG, MPO, PNG, TIF, TIFF, WebP) for validating image loading pipelines.
 keywords: COCO12-Formats, Ultralytics, dataset, image formats, object detection, YOLO, AVIF, BMP, DNG, HEIC, JP2, JPEG, PNG, TIFF, WebP, MPO
 ---
@@ -8,7 +15,7 @@ keywords: COCO12-Formats, Ultralytics, dataset, image formats, object detection,
 
 ## Introduction
 
-The [Ultralytics](https://www.ultralytics.com/) COCO12-Formats dataset is a specialized test dataset designed to validate image loading across 12 supported image format extensions. It contains 12 images (6 for training, 6 for validation), each saved in a different format to ensure comprehensive testing of the image loading pipeline.
+The [Ultralytics](https://www.ultralytics.com) COCO12-Formats dataset is a specialized test dataset designed to validate image loading across 12 supported image format extensions. It contains 12 images (6 for training, 6 for validation), each saved in a different format to ensure comprehensive testing of the image loading pipeline.
 
 This dataset is invaluable for:
 
@@ -16,6 +23,8 @@ This dataset is invaluable for:
 - **CI/CD pipelines**: Automated testing of format compatibility
 - **Debugging**: Isolate format-specific issues in training pipelines
 - **Development**: Validate new format additions or changes
+
+When you manage datasets on [Ultralytics Platform](https://platform.ultralytics.com/ultralytics/datasets/coco12-formats), images in any of these formats are handled automatically—no manual conversion required.
 
 ## Supported Formats
 
@@ -38,7 +47,7 @@ The dataset includes one image for each of 12 supported format extensions define
 
 ## Dataset Structure
 
-```
+```text
 coco12-formats/
 ├── images/
 │   ├── train/          # 6 images (avif, bmp, dng, heic, jpeg, jpg)
@@ -99,7 +108,7 @@ For OpenCV to read AVIF files directly, `libavif` must be installed **before** b
 
 ## Usage
 
-To train a YOLO model on the COCO12-Formats dataset, use the following examples:
+The COCO12-Formats dataset (1 MB) downloads automatically the first time you start training. To train a YOLO model on the COCO12-Formats dataset, use the following examples:
 
 !!! example "Train Example"
 

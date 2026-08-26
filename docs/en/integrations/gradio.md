@@ -29,7 +29,7 @@ This Gradio interface provides an easy and interactive way to perform [object de
 - **Broad Accessibility:** The Gradio web interface can be accessed by anyone, making it an excellent tool for demonstrations, educational purposes, and quick experiments.
 
 <p align="center">
-   <img width="800" alt="Gradio YOLO detection interface" src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/gradio-example-screenshot.avif">
+   <img width="800" alt="Gradio YOLO detection interface" src="https://cdn.ul.run/i/cdbe1c42e06247a42987c0f3f1b8f211.avif">
 </p>
 
 ## How to Install Gradio
@@ -57,7 +57,7 @@ This section provides the Python code used to create a Gradio interface for Ultr
 
 ```python
 import gradio as gr
-import PIL.Image as Image
+from PIL import Image
 
 from ultralytics import ASSETS, YOLO
 

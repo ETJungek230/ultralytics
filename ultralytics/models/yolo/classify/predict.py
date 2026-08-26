@@ -53,16 +53,13 @@ class ClassificationPredictor(BasePredictor):
     def setup_source(self, source):
         """Set up source and inference mode and classify transforms."""
         super().setup_source(source)
-        updated = (
-            self.model.model.transforms.transforms[0].size != max(self.imgsz)
-            if hasattr(self.model.model, "transforms") and hasattr(self.model.model.transforms.transforms[0], "size")
-            else False
-        )
+        transforms = getattr(self.model.model, "transforms", None)  # missing on YAML-built and legacy checkpoints
+        size = getattr(transforms.transforms[0], "size", max(self.imgsz)) if transforms is not None else None
         if hasattr(self.model.model, "yaml"):
             self.ch = self.model.model.yaml.get("channels", 3)
         if self.ch == 3:
             self.transforms = (
-                classify_transforms(self.imgsz) if updated or self.model.format != "pt" else self.model.model.transforms
+                transforms if size == max(self.imgsz) and self.model.format == "pt" else classify_transforms(self.imgsz)
             )
         else:
             self.transforms = classify_transforms(self.imgsz, mean=[0] * self.ch, std=[1] * self.ch)
@@ -79,7 +76,8 @@ class ClassificationPredictor(BasePredictor):
                     [self.transforms(Image.fromarray(im.reshape(im.shape[:2]))) for im in img], dim=0
                 )
         img = (img if isinstance(img, torch.Tensor) else torch.from_numpy(img)).to(self.model.device)
-        return img.half() if self.model.fp16 else img.float()  # Convert uint8 to fp16/32
+        img = img.half() if self.model.fp16 else img.float()  # Convert uint8 to fp16/32
+        return img
 
     def postprocess(self, preds, img, orig_imgs):
         """Process predictions to return Results objects with classification probabilities.

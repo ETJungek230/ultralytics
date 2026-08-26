@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import types
 from pathlib import Path
 from typing import Any
 
 import torch
-import torch.nn as nn
+from torch import nn
 
+from ultralytics.nn.modules import Detect
 from ultralytics.utils import LOGGER
 from ultralytics.utils.checks import check_requirements
 
@@ -147,6 +149,7 @@ def pipeline_coreml(
 
     # Update metadata
     pipeline.spec.specificationVersion = spec.specificationVersion
+    pipeline.spec.description.metadata.CopyFrom(spec.description.metadata)
     pipeline.spec.description.metadata.userDefined.update(
         {"IoU threshold": str(nms.iouThreshold), "Confidence threshold": str(nms.confidenceThreshold)}
     )
@@ -162,6 +165,11 @@ def pipeline_coreml(
     model.output_description["coordinates"] = "Boxes × [x, y, width, height] (relative to image size)"
     LOGGER.info(f"{prefix} pipeline success")
     return model
+
+
+def _coreml_gather(self, x: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
+    """Select index (batch, k) rows of x along dim 1, keeping the indices int32 through MIL."""
+    return x[torch.arange(x.shape[0])[..., None], index]
 
 
 def torch2coreml(
@@ -194,6 +202,9 @@ def torch2coreml(
     import coremltools as ct
 
     LOGGER.info(f"\n{prefix} starting export with coremltools {ct.__version__}...")
+    for m in model.modules():  # MIL types int64 gather indices as fp32 and then rejects them
+        if isinstance(m, Detect):
+            m._gather = types.MethodType(_coreml_gather, m)
     ts = torch.jit.trace(model.eval(), im, strict=False)  # TorchScript model
     fp16 = quantize == 16
     weight_int8 = quantize in {8, "w8a16"}
@@ -202,12 +213,12 @@ def torch2coreml(
     # Internally based on the model conversion and output type.
     # Setting minimum_deployment_target >= iOS16 will require setting compute_precision=ct.precision.FLOAT32.
     # iOS16 adds in better support for FP16, but none of the CoreML NMS specifications handle FP16 as input.
-    convert_kwargs = dict(
-        inputs=inputs,
-        classifier_config=ct.ClassifierConfig(classifier_names) if classifier_names else None,
-        convert_to="neuralnetwork" if mlmodel else "mlprogram",
-        skip_model_load=True,
-    )
+    convert_kwargs = {
+        "inputs": inputs,
+        "classifier_config": ct.ClassifierConfig(classifier_names) if classifier_names else None,
+        "convert_to": "neuralnetwork" if mlmodel else "mlprogram",
+        "skip_model_load": True,
+    }
     if not mlmodel:
         # ML Program conversion defaults to FP16. Pin FP32 unless FP16/INT8 was requested.
         from ultralytics.nn.modules.head import RTDETRDecoder

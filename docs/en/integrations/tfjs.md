@@ -22,7 +22,7 @@ The 'export to TF.js model format' feature allows you to optimize your [Ultralyt
 Exporting your machine learning models to TensorFlow.js, developed by the TensorFlow team as part of the broader TensorFlow ecosystem, offers numerous advantages for deploying machine learning applications. It helps enhance user privacy and security by keeping sensitive data on the device. The image below shows the TensorFlow.js architecture, and how machine learning models are converted and deployed on both web browsers and Node.js.
 
 <p align="center">
-  <img width="100%" src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/tfjs-architecture.avif" alt="TensorFlow.js browser ML inference architecture">
+  <img width="100%" src="https://cdn.ul.run/i/deb6049be0dd044a4eb34b7c680977f0.avif" alt="TensorFlow.js browser ML inference architecture">
 </p>
 
 Running models locally also reduces latency and provides a more responsive user experience. [TensorFlow.js](https://www.tensorflow.org/js) also comes with offline capabilities, allowing users to use your application even without an internet connection. TF.js is designed for efficient execution of complex models on devices with limited resources as it is engineered for scalability, with GPU acceleration support.
@@ -85,14 +85,14 @@ The `tfjs` argument now exports a [LiteRT](litert.md) `.tflite` model, which sup
         model = YOLO("yolo26n.pt")
 
         # Export the model to TF.js format
-        model.export(format="litert")  # creates 'yolo26n.tflite'
+        model.export(format="litert", imgsz=640)  # use imgsz=224 for classification
         ```
 
     === "CLI"
 
         ```bash
         # Export a YOLO26n PyTorch model to TF.js format
-        yolo export model=yolo26n.pt format=litert # creates 'yolo26n.tflite'
+        yolo export model=yolo26n.pt format=litert imgsz=640 # use imgsz=224 for classification
         ```
 
 !!! note "Predict and Validate"
@@ -101,15 +101,15 @@ The `tfjs` argument now exports a [LiteRT](litert.md) `.tflite` model, which sup
 
 ### Export Arguments
 
-| Argument   | Type             | Default        | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ---------- | ---------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `format`   | `str`            | `'tfjs'`       | Target format for the exported model, defining compatibility with various deployment environments.                                                                                                                                                                                                                                                                                                                                                            |
-| `imgsz`    | `int` or `tuple` | `640`          | Desired image size for the model input. Can be an integer for square images or a tuple `(height, width)` for specific dimensions.                                                                                                                                                                                                                                                                                                                             |
-| `quantize` | `int` or `str`   | `None`         | Quantization precision: `8` (static INT8, int8 weights + int8 activations; needs calibration `data`/`fraction`), `'w8a16'` (static, int8 weights + int16 activations; needs calibration `data`/`fraction`), `'w8a32'` (dynamic INT8, int8 weights + FP32 activations; no calibration needed), or `32`/unset (FP32). FP16 is not exported separately — an FP32 model runs in FP16 automatically on GPU delegates. Replaces the deprecated `half`/`int8` flags. |
-| `batch`    | `int`            | `1`            | Specifies export model batch inference size or the max number of images the exported model will process concurrently in `predict` mode.                                                                                                                                                                                                                                                                                                                       |
-| `data`     | `str`            | `'coco8.yaml'` | Path to the [dataset](../datasets/index.md) configuration file (default: `coco8.yaml`), essential for quantization.                                                                                                                                                                                                                                                                                                                                           |
-| `fraction` | `float`          | `1.0`          | Specifies the fraction of the dataset to use for INT8 quantization calibration. Allows for calibrating on a subset of the full dataset, useful for experiments or when resources are limited. If not specified with INT8 enabled, the full dataset will be used.                                                                                                                                                                                              |
-| `device`   | `str`            | `None`         | Specifies the device for exporting: CPU (`device=cpu`), MPS for Apple silicon (`device=mps`).                                                                                                                                                                                                                                                                                                                                                                 |
+| Argument   | Type             | Default  | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ---------- | ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `format`   | `str`            | `'tfjs'` | Target format for the exported model, defining compatibility with various deployment environments.                                                                                                                                                                                                                                                                                                                                                            |
+| `imgsz`    | `int` or `tuple` | `640`    | Desired image size for the model input. Can be an integer for square images or a tuple `(height, width)` for specific dimensions.                                                                                                                                                                                                                                                                                                                             |
+| `quantize` | `int` or `str`   | `None`   | Quantization precision: `8` (static INT8, int8 weights + int8 activations; needs calibration `data`/`fraction`), `'w8a16'` (static, int8 weights + int16 activations; needs calibration `data`/`fraction`), `'w8a32'` (dynamic INT8, int8 weights + FP32 activations; no calibration needed), or `32`/unset (FP32). FP16 is not exported separately — an FP32 model runs in FP16 automatically on GPU delegates. Replaces the deprecated `half`/`int8` flags. |
+| `batch`    | `int`            | `1`      | Specifies export model batch inference size or the max number of images the exported model will process concurrently in `predict` mode.                                                                                                                                                                                                                                                                                                                       |
+| `data`     | `str`            | `None`   | Path to the [dataset](../datasets/index.md) YAML, essential for quantization; classification instead takes a dataset directory or a built-in dataset name. If omitted with `quantize=8` or `'w8a16'`, Ultralytics selects the default calibration dataset for the model task.                                                                                                                                                                                 |
+| `fraction` | `float`          | `1.0`    | Specifies the fraction of the dataset to use for INT8 quantization calibration. Allows for calibrating on a subset of the full dataset, useful for experiments or when resources are limited. If not specified with INT8 enabled, the full dataset will be used.                                                                                                                                                                                              |
+| `device`   | `str`            | `None`   | Specifies the device for exporting: CPU (`device=cpu`), MPS for Apple silicon (`device=mps`).                                                                                                                                                                                                                                                                                                                                                                 |
 
 For more details about the export process, visit the [Ultralytics documentation page on exporting](../modes/export.md).
 
@@ -150,7 +150,7 @@ Exporting Ultralytics YOLO26 models to TensorFlow.js (TF.js) format is straightf
         model = YOLO("yolo26n.pt")
 
         # Export the model to TF.js format
-        model.export(format="litert")  # creates 'yolo26n.tflite'
+        model.export(format="litert", imgsz=640)  # use imgsz=224 for classification
 
         # The exported '.tflite' model runs in the browser via LiteRT.js or locally with yolo predict/val.
         ```
@@ -159,7 +159,7 @@ Exporting Ultralytics YOLO26 models to TensorFlow.js (TF.js) format is straightf
 
         ```bash
         # Export a YOLO26n PyTorch model to TF.js format
-        yolo export model=yolo26n.pt format=litert # creates 'yolo26n.tflite'
+        yolo export model=yolo26n.pt format=litert imgsz=640 # use imgsz=224 for classification
 
         # The exported '.tflite' model runs in the browser via LiteRT.js or locally with yolo predict/val.
         ```

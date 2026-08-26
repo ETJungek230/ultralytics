@@ -7,7 +7,7 @@ keywords: Ultralytics, YOLO, open-source, contribution, pull request, code of co
 
 # Contributing to Ultralytics Open-Source Projects
 
-Welcome! We're thrilled that you're considering contributing to our [Ultralytics](https://www.ultralytics.com/) [open-source](https://github.com/ultralytics) projects. Your involvement not only helps enhance the quality of our repositories but also benefits the entire [computer vision](https://www.ultralytics.com/glossary/computer-vision-cv) community. This guide provides clear guidelines and best practices to help you get started.
+Welcome! We're thrilled that you're considering contributing to our [Ultralytics](https://www.ultralytics.com) [open-source](https://github.com/ultralytics) projects. Your involvement not only helps enhance the quality of our repositories but also benefits the entire [computer vision](https://www.ultralytics.com/glossary/computer-vision-cv) community. This guide provides clear guidelines and best practices to help you get started.
 
 [![Ultralytics open-source contributors](https://raw.githubusercontent.com/ultralytics/assets/main/im/image-contributors.png)](https://github.com/ultralytics/ultralytics/graphs/contributors)
 
@@ -37,13 +37,24 @@ We greatly appreciate contributions in the form of [pull requests (PRs)](https:/
 5. **[Commit your changes](https://docs.github.com/en/desktop/making-changes-in-a-branch/committing-and-reviewing-changes-to-your-project-in-github-desktop):** Commit your changes with concise and descriptive commit messages. If your changes address a specific issue, include the issue number (e.g., `Fix #123: Corrected calculation error.`).
 6. **[Create a pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request):** Submit a pull request from your branch to the `main` branch of the original Ultralytics repository. Provide a clear title and a detailed description explaining the purpose and scope of your changes.
 
+### 📚 Documentation Changes
+
+Documentation source lives under `docs/en/`. From the repository root, install the development dependencies and run the complete strict validation before opening a PR:
+
+```bash
+uv pip install -e ".[dev]"
+python docs/build_docs.py
+```
+
+The validation prepares generated references, macros, and comparison pages before running `zensical build --strict`. For a faster live preview of pages that do not use macros, run `zensical serve`.
+
 ### 📝 CLA Signing
 
 Before we can merge your pull request, you must sign our [Contributor License Agreement (CLA)](CLA.md). This legal agreement ensures that your contributions are properly licensed, allowing the project to continue being distributed under the [AGPL-3.0 license](https://www.ultralytics.com/legal/agpl-3-0-software-license).
 
 After submitting your pull request, the CLA bot will guide you through the signing process. To sign the CLA, simply add a comment in your PR stating:
 
-```
+```text
 I have read the CLA Document and I sign the CLA
 ```
 
@@ -124,14 +135,14 @@ When adding new functions or classes, include [Google-style docstrings](https://
         Note: Even though Python returns multiple values as a tuple (e.g., `return masks, scores`), always document each value separately for clarity and better tool integration. When documenting functions that return multiple values:
 
         ✅ Good - Document each return value separately:
-        ```
+        ```text
         Returns:
            (np.ndarray): Predicted masks with shape HxWxN.
            (list): Confidence scores for each instance.
         ```
 
         ❌ Bad - Don't document as a tuple with nested elements:
-        ```
+        ```text
         Returns:
            (tuple): Tuple containing:
                - (np.ndarray): Predicted masks with shape HxWxN.
@@ -257,7 +268,7 @@ Complying means making the **complete corresponding source code** of your projec
 
 Refer to the [Ultralytics Template Repository](https://github.com/ultralytics/template) for a practical example structure:
 
-```
+```text
 my-yolo-project/
 │
 ├── LICENSE               # Full AGPL-3.0 license text
@@ -282,7 +293,7 @@ By following these guidelines, you ensure compliance with AGPL-3.0, supporting t
 
 ## Conclusion
 
-Thank you for your interest in contributing to [Ultralytics](https://www.ultralytics.com/) [open-source](https://github.com/ultralytics) YOLO projects. Your participation is essential in shaping the future of our software and building a vibrant community of innovation and collaboration. Whether you're enhancing code, reporting bugs, or suggesting new features, your contributions are invaluable.
+Thank you for your interest in contributing to [Ultralytics](https://www.ultralytics.com) [open-source](https://github.com/ultralytics) YOLO projects. Your participation is essential in shaping the future of our software and building a vibrant community of innovation and collaboration. Whether you're enhancing code, reporting bugs, or suggesting new features, your contributions are invaluable.
 
 We're excited to see your ideas come to life and appreciate your commitment to advancing [object detection](https://www.ultralytics.com/glossary/object-detection) technology. Together, let's continue to grow and innovate in this exciting open-source journey.
 
@@ -296,7 +307,7 @@ Contributing to Ultralytics YOLO open-source repositories improves the software,
 
 To sign the Contributor License Agreement (CLA), follow the instructions provided by the CLA bot after submitting your pull request. This process ensures that your contributions are properly licensed under the AGPL-3.0 license, maintaining the legal integrity of the open-source project. Add a comment in your pull request stating:
 
-```
+```text
 I have read the CLA Document and I sign the CLA
 ```
 

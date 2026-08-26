@@ -7,7 +7,7 @@ keywords: Ultralytics, utilities, data processing, auto annotation, YOLO, datase
 # Simple Utilities
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/code-with-perspective.avif" alt="YOLO model code with 3D perspective visualization">
+  <img src="https://cdn.ul.run/i/5d9620833417e6cd356b94012f84af36.avif" alt="YOLO model code with 3D perspective visualization">
 </p>
 
 The `ultralytics` package provides a variety of utilities to support, enhance, and accelerate your workflows. While there are many more available, this guide highlights some of the most useful ones for developers, serving as a practical reference for programming with Ultralytics tools.
@@ -68,7 +68,7 @@ visualize_image_annotations(
 
 ### Convert Segmentation Masks into YOLO Format
 
-![Segmentation Masks to YOLO Format](https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/segmentation-masks-to-yolo-format.avif)
+![Segmentation Masks to YOLO Format](https://cdn.ul.run/i/f19e424efa2177fa76251d68ea5d1f73.avif)
 
 Use this to convert a dataset of segmentation mask images to the [Ultralytics YOLO](../models/yolo26.md) segmentation format. This function takes the directory containing the binary format mask images and converts them into YOLO segmentation format.
 
@@ -125,7 +125,7 @@ for box in results[0].boxes.xyxy.cpu():
 
 With existing `x y w h` bounding box data, convert to segments using the `yolo_bbox2segment` function. Organize the files for images and annotations as follows:
 
-```
+```text
 data
 |__ images
     ├─ 001.jpg
@@ -475,6 +475,8 @@ Also see the [`Annotator` Reference Page](../reference/utils/plotting.md#ultraly
 !!! example "Sweep Annotation using Ultralytics Utilities"
 
     ```python
+    import sys
+
     import cv2
     import numpy as np
 
@@ -488,7 +490,7 @@ Also see the [`Annotator` Reference Page](../reference/utils/plotting.md#ultraly
 
     if not cap.isOpened():
         print("Error: Could not open video.")
-        exit()
+        sys.exit()
 
     # Initialize the video writer object.
     w, h, fps = (int(cap.get(x)) for x in (cv2.CAP_PROP_FRAME_WIDTH, cv2.CAP_PROP_FRAME_HEIGHT, cv2.CAP_PROP_FPS))
@@ -732,7 +734,7 @@ auto_annotate(
 )
 ```
 
-For more details, check the [auto_annotate reference section](../reference/data/annotator.md#ultralytics.data.annotator.auto_annotate), or use [Ultralytics Platform](https://platform.ultralytics.com/) as a hosted, no-code alternative with click-based masking via [SAM 2.1](../models/sam-2.md) or [SAM 3](../models/sam-3.md), or predictions from pretrained and fine-tuned YOLO models for detect, segment, and OBB tasks.
+For more details, check the [auto_annotate reference section](../reference/data/annotator.md#ultralytics.data.annotator.auto_annotate), or use [Ultralytics Platform](https://platform.ultralytics.com) as a hosted, no-code alternative with click-based masking via [SAM 2.1](../models/sam-2.md) or [SAM 3](../models/sam-3.md), or predictions from pretrained and fine-tuned YOLO models for detect, segment, and OBB tasks.
 
 ### How do I convert COCO dataset annotations to YOLO format in Ultralytics?
 
@@ -753,7 +755,7 @@ For additional information, visit the [convert_coco reference page](../reference
 
 ### How can I analyze my dataset composition and distribution?
 
-[Ultralytics Platform](https://platform.ultralytics.com/) provides automatic dataset analytics: the `Charts` tab shows split distribution, top class counts, image-dimension histograms, and 2D heatmaps of annotation positions, helping you spot imbalances and outliers before training.
+[Ultralytics Platform](https://platform.ultralytics.com) provides automatic dataset analytics: the `Charts` tab shows split distribution, top class counts, image-dimension histograms, and 2D heatmaps of annotation positions, helping you spot imbalances and outliers before training.
 
 ### How can I convert bounding boxes to segments in Ultralytics?
 

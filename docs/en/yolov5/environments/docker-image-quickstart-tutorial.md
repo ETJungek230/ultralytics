@@ -39,36 +39,14 @@ Next, install the NVIDIA Container Toolkit. The commands below are typical for D
         | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
     ```
 
-    Update the package lists and install the nvidia-container-toolkit package:
+    Update the package lists and install the NVIDIA Container Toolkit:
 
     ```bash
     sudo apt-get update
     ```
 
-    Install Latest version of nvidia-container-toolkit:
-
     ```bash
-    sudo apt-get install -y nvidia-container-toolkit \
-      nvidia-container-toolkit-base libnvidia-container-tools \
-      libnvidia-container1
-    ```
-
-    ??? info "Optional: Install specific version of nvidia-container-toolkit"
-
-        Optionally, you can install a specific version of the nvidia-container-toolkit by setting the `NVIDIA_CONTAINER_TOOLKIT_VERSION` environment variable:
-
-        ```bash
-        export NVIDIA_CONTAINER_TOOLKIT_VERSION=1.18.1-1
-        sudo apt-get install -y \
-          nvidia-container-toolkit=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
-          nvidia-container-toolkit-base=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
-          libnvidia-container-tools=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
-          libnvidia-container1=${NVIDIA_CONTAINER_TOOLKIT_VERSION}
-        ```
-
-    ```bash
-    sudo nvidia-ctk runtime configure --runtime=docker
-    sudo systemctl restart docker
+    sudo apt-get install -y nvidia-container-toolkit
     ```
 
 === "RHEL/CentOS/Fedora/Amazon Linux"
@@ -78,37 +56,8 @@ Next, install the NVIDIA Container Toolkit. The commands below are typical for D
       | sudo tee /etc/yum.repos.d/nvidia-container-toolkit.repo
     ```
 
-    Update the package lists and install the nvidia-container-toolkit package:
-
     ```bash
-    sudo dnf clean expire-cache
-    sudo dnf check-update
-    ```
-
-    ```bash
-    sudo dnf install \
-      nvidia-container-toolkit \
-      nvidia-container-toolkit-base \
-      libnvidia-container-tools \
-      libnvidia-container1
-    ```
-
-    ??? info "Optional: Install specific version of nvidia-container-toolkit"
-
-        Optionally, you can install a specific version of the nvidia-container-toolkit by setting the `NVIDIA_CONTAINER_TOOLKIT_VERSION` environment variable:
-
-        ```bash
-        export NVIDIA_CONTAINER_TOOLKIT_VERSION=1.18.1-1
-        sudo dnf install -y \
-          nvidia-container-toolkit-${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
-          nvidia-container-toolkit-base-${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
-          libnvidia-container-tools-${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
-          libnvidia-container1-${NVIDIA_CONTAINER_TOOLKIT_VERSION}
-        ```
-
-    ```bash
-    sudo nvidia-ctk runtime configure --runtime=docker
-    sudo systemctl restart docker
+    sudo dnf install -y nvidia-container-toolkit
     ```
 
 ### Verify CDI Devices with Docker
@@ -119,7 +68,7 @@ Run `nvidia-ctk cdi list` to ensure the GPU CDI devices are available (the toolk
 nvidia-ctk cdi list
 ```
 
-You should see entries such as `nvidia.com/gpu=0` and `nvidia.com/gpu=all`. CDI device requests require Docker >= 28.2.0 and NVIDIA Container Toolkit >= 1.18; on older hosts, use the legacy `--runtime=nvidia --gpus all` flags instead.
+You should see entries such as `nvidia.com/gpu=0` and `nvidia.com/gpu=all`. On Linux, CDI device requests require Docker >= 28.2.0 and NVIDIA Container Toolkit >= 1.18. The legacy `--gpus all` flag can lose GPU access after host daemon reloads, so upgrade older Linux hosts and use `--device` instead.
 
 ## Step 1: Pull the YOLOv5 Docker Image
 
@@ -200,6 +149,6 @@ Explore the documentation for detailed usage of different modes:
 
 Learn more about evaluation metrics like [Precision](https://www.ultralytics.com/glossary/precision), [Recall](https://www.ultralytics.com/glossary/recall), and [mAP](https://www.ultralytics.com/glossary/mean-average-precision-map). Understand different export formats like [ONNX](../../integrations/onnx.md), [CoreML](../../integrations/coreml.md), and [TFLite](../../integrations/litert.md), and explore various [Model Deployment Options](../../guides/model-deployment-options.md). Remember to manage your [model weights](https://www.ultralytics.com/glossary/model-weights) effectively.
 
-<p align="center"><img width="1000" src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/gcp-running-docker.avif" alt="Running YOLOv5 inside a Docker container on GCP"></p>
+<p align="center"><img width="1000" src="https://cdn.ul.run/i/3d3f5576bad0b4a2ea37db62f9d020f8.avif" alt="Running YOLOv5 inside a Docker container on GCP"></p>
 
 You have successfully set up and run YOLOv5 within a Docker container.

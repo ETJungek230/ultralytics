@@ -2,12 +2,12 @@
 
 <img alt="C++" src="https://img.shields.io/badge/C%2B%2B-17-00599C.svg?logo=cplusplus&logoColor=white"> <img alt="LibTorch" src="https://img.shields.io/badge/LibTorch-EE4C2C.svg?logo=pytorch&logoColor=white"> <img alt="OpenCV" src="https://img.shields.io/badge/OpenCV-5C3EE8.svg?logo=opencv&logoColor=white">
 
-A C++ application that runs every [Ultralytics YOLO](https://docs.ultralytics.com/) task and model generation as [TorchScript](https://docs.pytorch.org/docs/stable/jit.html) with the [LibTorch (PyTorch C++ API)](https://docs.pytorch.org/cppdocs/) and [OpenCV](https://opencv.org/). Point it at any exported `.torchscript` model; the task, class names, and input size are read from the model metadata, and the right post-processing is selected automatically.
+A C++ application that runs every [Ultralytics YOLO](https://docs.ultralytics.com) task and model generation as [TorchScript](https://docs.pytorch.org/docs/stable/jit.html) with the [LibTorch (PyTorch C++ API)](https://docs.pytorch.org/cppdocs/) and [OpenCV](https://opencv.org/). Point it at any exported `.torchscript` model; the task, class names, and input size are read from the model metadata, and the right post-processing is selected automatically.
 
 ## ✨ Features
 
-- **All tasks:** [detect](https://docs.ultralytics.com/tasks/detect), [segment](https://docs.ultralytics.com/tasks/segment), [pose](https://docs.ultralytics.com/tasks/pose), [OBB](https://docs.ultralytics.com/tasks/obb), [classify](https://docs.ultralytics.com/tasks/classify), and YOLO26 semantic segmentation.
-- **All generations:** [YOLOv8](https://docs.ultralytics.com/models/yolov8), [YOLO11](https://docs.ultralytics.com/models/yolo11), and [YOLO26](https://docs.ultralytics.com/models/yolo26). Grid (YOLOv8/11) and end-to-end (YOLO26) outputs are detected automatically.
+- **All tasks:** [detect](https://docs.ultralytics.com/tasks/detect), [segment](https://docs.ultralytics.com/tasks/segment), [pose](https://docs.ultralytics.com/tasks/pose), [OBB](https://docs.ultralytics.com/tasks/obb), [classify](https://docs.ultralytics.com/tasks/classify), and Ultralytics YOLO26 semantic segmentation.
+- **All generations:** [Ultralytics YOLOv8](https://docs.ultralytics.com/models/yolov8), [Ultralytics YOLO11](https://docs.ultralytics.com/models/yolo11), and [Ultralytics YOLO26](https://docs.ultralytics.com/models/yolo26). Grid (YOLOv8/11) and end-to-end (YOLO26) outputs are detected automatically.
 - **Zero configuration:** task, class names, and `imgsz` come from the TorchScript `config.txt` metadata that Ultralytics embeds on export.
 
 ## 📋 Dependencies

@@ -87,7 +87,7 @@ modal run modal_yolo.py
 
 Expected output:
 
-```
+```text
 ✓ Initialized. View run at https://modal.com/apps/your-username/main/ap-xxxxxxxx
 ✓ Created objects.
 ├── 🔨 Created mount modal_yolo.py
@@ -109,7 +109,7 @@ Detected 5 objects:
 You can monitor your function execution in the Modal dashboard:
 
 <p align="center">
-  <img width="800" src="https://cdn.jsdelivr.net/gh/ultralytics/assets@fda2504f1e5dab2f437097ac7b99a7da984e4243/docs/modal-dashboard-function-calls.avif" alt="Modal Dashboard Function Calls">
+  <img width="800" src="https://cdn.ul.run/i/75113e6bc8a337d58552580190ee4488.avif" alt="Modal Dashboard Function Calls">
 </p>
 
 ## Using GPU for Faster Inference

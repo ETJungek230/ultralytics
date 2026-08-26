@@ -1,33 +1,51 @@
 ---
+plans: [free, pro, enterprise]
 title: Platform Integrations
 comments: true
-description: Connect Ultralytics Platform to the tools you already use and bring your data across with a single API key. Import from Ultralytics HUB and Roboflow — no manual export or re-upload.
-keywords: Ultralytics Platform, integrations, data import, Roboflow, Ultralytics HUB, dataset migration, YOLO, computer vision
+description: Connect Ultralytics Platform to Slack, existing tools, cloud storage, and Enterprise On Premise compute and datasets.
+keywords: Ultralytics Platform, integrations, Slack, alerts, data import, Roboflow, Labelbox, LabelMe, CVAT, Label Studio, cloud storage, GCS, Amazon S3, Azure Blob Storage, On Premise, dataset migration, YOLO, computer vision
 ---
 
 # Integrations
 
-[Ultralytics Platform](https://platform.ultralytics.com) integrations connect your workspace to other tools and services you already use. Today, integrations let you bring your data without manually exporting archives and re-uploading them — connect an account with an API key.
+[Ultralytics Platform](https://platform.ultralytics.com) [integrations](../../integrations/index.md) connect your workspace to other tools and services you already use. Send job results to Slack, import existing datasets with a single API key, or connect your cloud storage and use the data where it lives.
 
-![Ultralytics Platform Settings Integrations Tab](https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/platform/settings-integrations-tab.avif)
+![Ultralytics Platform Settings Integrations Tab](https://cdn.ul.run/i/ff5b55316ea85e8eadcffa272698239c.avif)<!-- screenshot -->
 
 ## Accessing Integrations
 
 All integrations are managed from your account settings:
 
 1. Go to **Settings > Integrations**
-2. Find the card for the service you want to connect
-3. Paste your API key and click **Import**
+2. Pick a service from the list on the left — grouped into **Infrastructure**, **Notifications**, and **Imports** — or type its name in the search box
+3. Follow the connection prompts
 
-Each import starts with a preview so you can review exactly what will be transferred — and confirm you have enough [storage](../account/billing.md) — before anything is imported.
+Roboflow imports start with a preview so you can review what will be transferred and confirm that you have enough
+[storage](../account/billing.md). Labelbox, LabelMe, CVAT, and Label Studio need no connection at all — upload the
+exported dataset and Platform reads it directly. Cloud storage connections verify list and read access on every
+selected bucket before anything is saved.
 
 ## Available Integrations
 
-| Integration                               | What it brings in                                    |
-| ----------------------------------------- | ---------------------------------------------------- |
-| [**Ultralytics HUB**](ultralytics-hub.md) | Your datasets, projects, models, and account balance |
-| [**Roboflow**](roboflow.md)               | Your datasets                                        |
+| Integration                                         | Category       | What it does                                                                 |
+| --------------------------------------------------- | -------------- | ---------------------------------------------------------------------------- |
+| [**On Premise**](on-premise.md)                     | Infrastructure | Indexes and trains on datasets that never leave your own computer            |
+| [**Amazon S3**](amazon-s3.md)                       | Infrastructure | Indexes datasets in place from your S3 buckets                               |
+| [**Google Cloud Storage**](google-cloud-storage.md) | Infrastructure | Indexes datasets in place from your GCS buckets                              |
+| [**Azure Blob Storage**](azure-blob-storage.md)     | Infrastructure | Indexes datasets in place from your blob containers                          |
+| [**Slack**](slack.md)                               | Notifications  | Posts selected training, export, and deployment results to one Slack channel |
+| [**Roboflow**](roboflow.md)                         | Imports        | Imports every supported dataset in a Roboflow workspace from an API key      |
+| [**Labelbox**](labelbox.md)                         | Imports        | Reads Labelbox NDJSON exports as datasets                                    |
+| [**LabelMe**](labelme.md)                           | Imports        | Imports the YOLO export produced by the LabelMe Toolkit                      |
+| [**CVAT**](cvat.md)                                 | Imports        | Imports CVAT Ultralytics YOLO and COCO exports — direct import coming soon   |
+| [**Label Studio**](label-studio.md)                 | Imports        | Imports Label Studio YOLO and COCO exports — direct import coming soon       |
 
-Connect once with an API key and the matching content lands in your workspace.
+## Plans and Permissions
 
-A **Weights & Biases** integration is coming soon to sync training runs, metrics, and artifacts with your W&B workspace.
+Slack alerts and every dataset import work on all plans. Google Cloud Storage, Amazon S3, and Azure Blob Storage
+connections require a [Pro or Enterprise plan](../account/billing.md#plans), and On Premise requires an active
+Enterprise plan.
+
+Connecting, changing, or disconnecting cloud storage and Slack requires the workspace admin or owner
+[role](../account/teams.md#roles-and-permissions). Importing datasets and connecting an On Premise host require the
+editor role.

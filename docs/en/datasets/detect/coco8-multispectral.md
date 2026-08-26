@@ -1,5 +1,12 @@
 ---
+title: COCO8-Multispectral Detection Dataset
 comments: true
+creator:
+    name: Ultralytics
+    url: https://www.ultralytics.com
+license:
+    name: CC-BY-4.0
+    url: https://cocodataset.org/#termsofuse
 description: Explore the Ultralytics COCO8-Multispectral dataset, an enhanced version of COCO8 with interpolated spectral channels, ideal for testing multispectral object detection models and training pipelines.
 keywords: COCO8-Multispectral, Ultralytics, dataset, multispectral, object detection, YOLO26, training, validation, machine learning, computer vision
 ---
@@ -8,13 +15,13 @@ keywords: COCO8-Multispectral, Ultralytics, dataset, multispectral, object detec
 
 ## Introduction
 
-The [Ultralytics](https://www.ultralytics.com/) COCO8-Multispectral dataset is an advanced variant of the original COCO8 dataset, designed to facilitate experimentation with multispectral object detection models. It consists of the same 8 images from the COCO train 2017 set—4 for training and 4 for validation—but with each image transformed into a 10-channel multispectral format. By expanding beyond standard RGB channels, COCO8-Multispectral enables the development and evaluation of models that can leverage richer spectral information.
+The [Ultralytics](https://www.ultralytics.com) COCO8-Multispectral dataset is an advanced variant of the original COCO8 dataset, designed to facilitate experimentation with multispectral object detection models. It consists of the same 8 images from the COCO train 2017 set—4 for training and 4 for validation—but with each image transformed into a 10-channel multispectral format. By expanding beyond standard RGB channels, COCO8-Multispectral enables the development and evaluation of models that can leverage richer spectral information.
 
 <p align="center">
-  <img width="640" src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/coco8-multispectral-overview.avif" alt="Multispectral imaging for object detection">
+  <img width="640" src="https://cdn.ul.run/i/ebea30ecd2c7b4014509e404db89a61d.avif" alt="Multispectral imaging for object detection">
 </p>
 
-COCO8-Multispectral is fully compatible with [Ultralytics Platform](https://platform.ultralytics.com/) and [YOLO26](../../models/yolo26.md), ensuring seamless integration into your [computer vision](https://www.ultralytics.com/glossary/computer-vision-cv) workflows.
+COCO8-Multispectral is fully compatible with [Ultralytics Platform](https://platform.ultralytics.com/ultralytics/datasets/coco8-multispectral) and [YOLO26](../../models/yolo26.md), ensuring seamless integration into your [computer vision](https://www.ultralytics.com/glossary/computer-vision-cv) workflows.
 
 <p align="center">
   <br>
@@ -24,8 +31,22 @@ COCO8-Multispectral is fully compatible with [Ultralytics Platform](https://plat
     allowfullscreen>
   </iframe>
   <br>
-  <strong>Watch:</strong> How to Train Ultralytics YOLO26 on Multispectral Datasets | Multi-Channel VisionAI 🚀
+  <strong>Watch:</strong> How to Train Ultralytics YOLO on Grayscale and Multispectral Datasets | Multi-Channel VisionAI 🚀
 </p>
+
+## Dataset Structure
+
+COCO8-Multispectral shares the same 8 images as [COCO8](coco8.md)—4 for training and 4 for validation across all 80 COCO object classes—but each image is stored as a 10-channel multispectral `.tiff` in [YOLO label format](../index.md):
+
+```text
+coco8-multispectral/
+├── images/
+│   ├── train/   # 4 images (10-channel .tiff)
+│   └── val/     # 4 images (10-channel .tiff)
+└── labels/
+    ├── train/
+    └── val/
+```
 
 ## Dataset Generation
 
@@ -67,7 +88,7 @@ The COCO8-Multispectral dataset is configured using a YAML file, which defines d
 
 ## Usage
 
-To train a YOLO26n model on the COCO8-Multispectral dataset for 100 [epochs](https://www.ultralytics.com/glossary/epoch) with an image size of 640, use the following examples. For a comprehensive list of training options, refer to the [YOLO Training documentation](../../modes/train.md).
+The COCO8-Multispectral dataset (20.2 MB) downloads automatically the first time you start training. To train a YOLO26n model on COCO8-Multispectral for 100 [epochs](https://www.ultralytics.com/glossary/epoch) with an image size of 640, use the following examples. For a comprehensive list of training options, refer to the [YOLO Training documentation](../../modes/train.md).
 
 !!! example "Train Example"
 
@@ -96,7 +117,7 @@ For more details on model selection and best practices, explore the [Ultralytics
 
 Below is an example of a mosaiced training batch from the COCO8-Multispectral dataset:
 
-<img src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/coco8-multispectral-mosaic-batch.avif" alt="COCO8 multispectral dataset mosaic training batch" width="800">
+<img src="https://cdn.ul.run/i/12354f6c1904e3d16e967ea542337979.avif" alt="COCO8 multispectral dataset mosaic training batch" width="800">
 
 - **Mosaiced Image**: This image demonstrates a training batch where multiple dataset images are combined using [mosaic augmentation](../../reference/data/augment.md). Mosaic augmentation increases the diversity of objects and scenes within each batch, helping the model generalize better to various object sizes, aspect ratios, and backgrounds.
 
@@ -135,7 +156,7 @@ Multispectral data provides additional spectral information beyond standard RGB,
 
 ### Is COCO8-Multispectral Compatible With Ultralytics Platform and YOLO Models?
 
-Yes, COCO8-Multispectral is fully compatible with [Ultralytics Platform](https://platform.ultralytics.com/) and all [YOLO models](../../models/yolo26.md), including the latest YOLO26. This allows you to easily integrate the dataset into your training and validation workflows.
+Yes, COCO8-Multispectral is fully compatible with [Ultralytics Platform](https://platform.ultralytics.com) and all [YOLO models](../../models/yolo26.md), including the latest YOLO26. This allows you to easily integrate the dataset into your training and validation workflows.
 
 ### Where Can I Find More Information on Data Augmentation Techniques?
 

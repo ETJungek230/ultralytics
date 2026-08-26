@@ -1,24 +1,27 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 import io
+import os
 import shutil
 import sys
 import threading
 import time
-import uuid
 from contextlib import redirect_stderr, redirect_stdout
 from itertools import product
 from pathlib import Path
 from types import SimpleNamespace
 
+if sys.platform == "win32":
+    os.environ.setdefault("ONEDNN_MAX_CPU_ISA", "AVX2")
+
 import pytest
 import torch
 
-from tests import SOURCE
+from tests import MODEL, SOURCE
 from tests.conftest import isolated_model_path
 from ultralytics import YOLO
 from ultralytics.cfg import TASK2DATA, TASK2MODEL, TASKS, _handle_deprecation, get_cfg
-from ultralytics.engine.exporter import EXPORT_ENVS, export_formats, validate_args
+from ultralytics.engine.exporter import EXPORT_ENVS, Exporter, export_formats, validate_args
 from ultralytics.utils import (
     ARM64,
     IS_RASPBERRYPI,
@@ -49,7 +52,7 @@ def skip_rpi_semantic(task):
 @pytest.mark.parametrize("end2end", [False, True])
 def test_export_torchscript(end2end, isolated_model):
     """Test YOLO model export to TorchScript format for compatibility and correctness."""
-    file = YOLO(isolated_model).export(format="torchscript", optimize=False, imgsz=32, end2end=end2end)
+    file = YOLO(isolated_model).export(format="torchscript", imgsz=32, end2end=end2end)
     YOLO(file)(SOURCE, imgsz=32)  # exported model inference
 
 
@@ -64,10 +67,33 @@ def test_export_onnx(end2end, isolated_model):
 @pytest.mark.parametrize("precision", [{"int8": True}, {"quantize": 8}])
 def test_export_onnx_int8(isolated_model, precision):
     """Test INT8 ONNX export via both the legacy int8 alias and the unified quantize arg."""
-    file = YOLO(isolated_model).export(format="onnx", data="coco8.yaml", fraction=0.25, imgsz=32, **precision)
+    file = YOLO(isolated_model).export(format="onnx", data=Path("coco8.yaml"), fraction=0.25, imgsz=32, **precision)
     assert Path(file).name.endswith("_int8.onnx")
     YOLO(file)(SOURCE, imgsz=32)  # exported model inference
     Path(file).unlink()  # cleanup
+
+
+def test_onnx_int8_quantize_excludes_non_weighted_ops(monkeypatch):
+    """Check ONNX INT8 keeps only weighted ops quantized while preserving the string return contract."""
+    import onnx
+    import onnxruntime.quantization as ort_quantization
+
+    from ultralytics.utils.export.onnx import onnx_int8_quantize
+
+    calls = {}
+    graph = SimpleNamespace(
+        node=[
+            SimpleNamespace(name="conv", op_type="Conv"),
+            SimpleNamespace(name="pool", op_type="MaxPool"),
+            SimpleNamespace(name="sigmoid", op_type="Sigmoid"),
+        ]
+    )
+
+    monkeypatch.setattr(onnx, "load", lambda _: SimpleNamespace(graph=graph))
+    monkeypatch.setattr(ort_quantization, "quantize_static", lambda *args, **kwargs: calls.update(kwargs))
+    result = onnx_int8_quantize(Path("model.onnx"), Path("model_int8.onnx"), [], lambda x: x)
+    assert result == "model_int8.onnx"
+    assert calls["nodes_to_exclude"] == ["pool", "sigmoid"]
 
 
 def test_quantize_canonicalization():
@@ -105,6 +131,18 @@ def test_quantize_deprecation():
     assert _handle_deprecation({"half": True})["quantize"] == 16
     assert _handle_deprecation({"half": True, "int8": True})["quantize"] == 8  # int8 wins
     assert "half" not in _handle_deprecation({"half": True})  # legacy flag is removed after forwarding
+    assert _handle_deprecation({"half": True, "quantize": None})["quantize"] is None  # explicit quantize wins
+    assert _handle_deprecation({"half": True, "quantize": 8})["quantize"] == 8  # explicit quantize still wins
+
+
+def test_benchmark_forwards_legacy_precision(monkeypatch):
+    """model.benchmark(half=True) must reach the benchmark call as quantize=16, not silently run FP32."""
+    import ultralytics.utils.benchmarks as bm
+
+    captured = {}
+    monkeypatch.setattr(bm, "benchmark", lambda **kw: captured.update(kw) or {})
+    YOLO(MODEL).benchmark(half=True, format="onnx", data="coco8.yaml")
+    assert captured["quantize"] == 16, f"legacy half was dropped: quantize={captured.get('quantize')}"
 
 
 def test_qnn_quantize_requires_w8a16():
@@ -119,6 +157,38 @@ def test_modelopt_quantize_onnx_requires_int8_dataset():
     """Check INT8 ModelOpt quantization fails early without calibration data."""
     with pytest.raises(ValueError, match="requires a calibration dataset"):
         modelopt_quantize_onnx("model.onnx", quantize=8)
+
+
+def test_int8_calibration_validates_split():
+    """Check INT8 calibration rejects dataset splits that do not exist."""
+    exporter = object.__new__(Exporter)
+    exporter.model = SimpleNamespace(task="obb")
+    exporter.args = SimpleNamespace(data="coco8.yaml", split="trainval")
+    exporter.imgsz = [32]
+    with pytest.raises(FileNotFoundError, match="trainval"):
+        exporter.get_int8_calibration_dataloader()
+
+
+def test_export_rknn_batch_expansion(monkeypatch, tmp_path):
+    """Check RKNN calibrates batch 1 before Toolkit expands to the requested batch."""
+    calls = {}
+    monkeypatch.setattr(
+        "ultralytics.utils.export.rknn.onnx2rknn", lambda **kwargs: calls.update(kwargs) or kwargs["output_dir"]
+    )
+    monkeypatch.setattr("ultralytics.engine.exporter.file_size", lambda _: 1)
+
+    image = tmp_path / "image.jpg"
+    exporter = SimpleNamespace(
+        args=SimpleNamespace(opset=None, quantize=8, name="rk3588", batch=8),
+        im=torch.zeros(8, 3, 32, 32),
+        file=tmp_path / "model.pt",
+        metadata={},
+        get_int8_calibration_dataloader=lambda prefix: SimpleNamespace(dataset=SimpleNamespace(im_files=[image])),
+    )
+    exporter.export_onnx = lambda: calls.update(onnx_batch=len(exporter.im)) or tmp_path / "model.onnx"
+    Exporter.export_rknn(exporter)
+    assert calls["onnx_batch"] == 1
+    assert calls["batch"] == 8
 
 
 def test_torch2onnx_serializes_concurrent_exports(monkeypatch, tmp_path):
@@ -160,10 +230,6 @@ def test_torch2onnx_serializes_concurrent_exports(monkeypatch, tmp_path):
 def test_export_openvino(end2end, isolated_model):
     """Test YOLO export to OpenVINO format for model inference compatibility."""
     file = YOLO(isolated_model).export(format="openvino", imgsz=32, end2end=end2end)
-    if WINDOWS:
-        # Ensure a unique export path per test to prevent OpenVINO file writes
-        file = Path(file)
-        file = file.rename(file.with_stem(f"{file.stem}-{uuid.uuid4()}"))
     YOLO(file)(SOURCE, imgsz=32)  # exported model inference
 
 
@@ -193,10 +259,6 @@ def test_export_openvino_matrix(task, dynamic, quantize, batch, nms, end2end):
         nms=nms,
         end2end=end2end,
     )
-    if WINDOWS:
-        # Use unique filenames due to Windows file permissions bug possibly due to latent threaded use
-        file = Path(file)
-        file = file.rename(file.with_stem(f"{file.stem}-{uuid.uuid4()}"))
     YOLO(file)([SOURCE] * batch, imgsz=64 if dynamic else 32, batch=batch)  # exported model inference
     shutil.rmtree(file, ignore_errors=True)  # retry in case of potential lingering multi-threaded file usage errors
 
@@ -274,7 +336,7 @@ def test_export_torchscript_matrix(task, dynamic, batch, nms, end2end, tmp_path)
         for task, dynamic, quantize, nms, batch, end2end in product(
             sorted(TASKS), [True, False], [8, 16], [True, False], [1], [True, False]
         )
-        if not (task != "detect" and nms)
+        if not (task not in {"detect", "segment", "pose"} and nms)
         and not (dynamic and nms)
         and not (task == "classify" and dynamic)
         and not (end2end and nms)
@@ -303,18 +365,41 @@ def test_export_coreml_matrix(task, dynamic, quantize, nms, batch, end2end):
     MACOS and checks.IS_PYTHON_MINIMUM_3_13,
     reason="coremltools deadlocks after OpenVINO on macOS Python 3.13 (conflicting OpenMP runtimes)",
 )
-def test_export_coreml(isolated_model):
+@pytest.mark.parametrize("format", ["coreml", "mlmodel"])
+def test_export_coreml(isolated_model, format, monkeypatch, tmp_path):
     """Test YOLO export to CoreML format and check for errors."""
+    from ultralytics.utils.export import coreml
+
+    quantize, torch2coreml = [], coreml.torch2coreml
+
+    def capture_quantize(*args, **kwargs):
+        quantize.append(kwargs["quantize"])
+        return torch2coreml(*args, **kwargs)
+
+    monkeypatch.setattr(coreml, "torch2coreml", capture_quantize)
     # Capture stdout and stderr
     stdout, stderr = io.StringIO(), io.StringIO()
     with redirect_stdout(stdout), redirect_stderr(stderr):
-        YOLO(isolated_model).export(format="coreml", nms=True, imgsz=32)
+        file = YOLO(isolated_model_path(tmp_path, WEIGHTS_DIR / "yolo11n.pt")).export(
+            format=format, nms=True, imgsz=32, iou=0.42, conf=0.24
+        )
+        import coremltools as ct
+
+        spec = ct.utils.load_spec(str(file))
+        metadata = spec.description.metadata
+        assert metadata.author and metadata.shortDescription and metadata.license and metadata.versionString
+        assert metadata.userDefined["IoU threshold"] == "0.42"
+        assert metadata.userDefined["Confidence threshold"] == "0.24"
+        assert all(key in metadata.userDefined for key in ("names", "stride", "task"))
+        assert next(iter(spec.pipeline.models[1].nonMaximumSuppression.stringClassLabels.vector)) == "person"
+        assert [output.name for output in spec.description.output] == ["confidence", "coordinates"]
         if MACOS:
             file = YOLO(isolated_model).export(format="coreml", imgsz=32)
             YOLO(file)(SOURCE, imgsz=32)  # model prediction only supported on macOS for nms=False models
 
     # Check captured output for errors
     output = stdout.getvalue() + stderr.getvalue()
+    assert quantize[0] == (16 if format == "coreml" else None)
     assert "Error" not in output, f"CoreML export produced errors: {output}"
     assert "You will not be able to run predict()" not in output, "CoreML export has predict() error"
 
@@ -331,6 +416,10 @@ def test_export_coreml_rtdetr():
     stdout, stderr = io.StringIO(), io.StringIO()
     with redirect_stdout(stdout), redirect_stderr(stderr):
         file = YOLO(WEIGHTS_DIR / "rtdetr-l.pt").export(format="coreml", imgsz=160)
+        import coremltools as ct
+
+        shape = ct.models.MLModel(str(file)).get_spec().description.output[0].type.multiArrayType.shape
+        assert shape[-2] == 300
         if MACOS:
             YOLO(file)(SOURCE, imgsz=160)
 
@@ -363,6 +452,37 @@ def test_export_mnn(isolated_model):
     """Test YOLO export to MNN format (WARNING: MNN test must precede NCNN test or CI error on Windows)."""
     file = YOLO(isolated_model).export(format="mnn", imgsz=32)
     YOLO(file)(SOURCE, imgsz=32)  # exported model inference
+
+
+@pytest.mark.parametrize(
+    "model,kwargs,error",
+    [
+        ("yolo11n.yaml", {"batch": 2, "dynamic": True, "nms": True}, "combining"),
+        ("yolo11n-seg.yaml", {"nms": True}, "only supports detect and pose"),
+        ("yolo11n-obb.yaml", {"nms": True}, "only supports detect and pose"),
+    ],
+)
+def test_export_mnn_rejects_unsupported_nms(model, kwargs, error):
+    """Test MNN rejects NMS combinations that fail or lose task outputs at runtime."""
+    with pytest.raises(ValueError, match=error):
+        YOLO(model).export(format="mnn", imgsz=32, **kwargs)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "model,task,kwargs",
+    [
+        ("yolo11n.yaml", "detect", {"batch": 2, "dynamic": True}),
+        ("yolo11n.yaml", "detect", {"nms": True}),
+        ("yolo11n-pose.yaml", "pose", {"nms": True}),
+    ],
+)
+def test_export_mnn_options(model, task, kwargs):
+    """Test MNN dynamic shapes and supported embedded NMS tasks through inference."""
+    batch = kwargs.get("batch", 1)
+    file = YOLO(model).export(format="mnn", imgsz=32, **kwargs)
+    assert len(YOLO(file, task=task)([SOURCE] * batch, imgsz=64 if kwargs.get("dynamic") else 32)) == batch
+    Path(file).unlink()
 
 
 @pytest.mark.slow
@@ -415,10 +535,10 @@ def test_export_imx():
 
 @pytest.mark.slow
 @pytest.mark.skipif(not LINUX or ARM64, reason="RKNN export only supported on non-aarch64 Linux")
-@pytest.mark.parametrize("quantize", [8, 16])
-def test_export_rknn(isolated_model, quantize):
+@pytest.mark.parametrize("quantize,batch", [(8, 8), (16, 1)])
+def test_export_rknn(isolated_model, quantize, batch):
     """Test YOLO export to RKNN format."""
-    file = YOLO(isolated_model).export(format="rknn", imgsz=32, quantize=quantize, data="coco8.yaml")
+    file = YOLO(isolated_model).export(format="rknn", imgsz=32, quantize=quantize, batch=batch, data="coco8.yaml")
     assert next(Path(file).rglob("*.rknn"), None), f"RKNN export failed, no RKNN model found in: {file}"
     shutil.rmtree(file, ignore_errors=True)
 
@@ -486,15 +606,14 @@ def test_export_executorch_matrix(task):
 
 
 @pytest.mark.skipif(
-    not (WINDOWS or (LINUX and ARM64)) or sys.version_info < (3, 11),
-    reason="onnxruntime-qnn ships prebuilt wheels only for Windows (x64/ARM64) and Linux ARM64 on Python>=3.11",
+    not (WINDOWS or LINUX) or sys.version_info < (3, 11),
+    reason="onnxruntime-qnn ships prebuilt wheels only for Windows and Linux on Python>=3.11",
 )
 def test_export_qnn(isolated_model):
     """Test YOLO export to Qualcomm QNN format via the ONNX Runtime QNN Execution Provider."""
     import importlib.util
 
-    # QNN EP ships either as the 'onnxruntime_qnn' plugin module (Windows/Linux-aarch64) or as a provider library
-    # bundled in onnxruntime/capi (Linux x86-64). Skip cleanly only when neither is present.
+    # QNN EP ships either as the 'onnxruntime_qnn' plugin module or as a provider library bundled in onnxruntime/capi.
     has_qnn = importlib.util.find_spec("onnxruntime_qnn") is not None
     if not has_qnn and importlib.util.find_spec("onnxruntime") is not None:
         import onnxruntime

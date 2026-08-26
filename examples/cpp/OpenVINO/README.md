@@ -2,12 +2,12 @@
 
 <img alt="C++" src="https://img.shields.io/badge/C%2B%2B-17-00599C.svg?logo=cplusplus&logoColor=white"> <img alt="OpenVINO" src="https://img.shields.io/badge/OpenVINO-00C7FD.svg?logo=intel&logoColor=white"> <img alt="OpenCV" src="https://img.shields.io/badge/OpenCV-5C3EE8.svg?logo=opencv&logoColor=white">
 
-A single C++ application that runs **every [Ultralytics YOLO](https://docs.ultralytics.com/) task and model generation** with the [Intel OpenVINO™ toolkit](https://docs.openvino.ai/) and [OpenCV](https://opencv.org/). Point it at an OpenVINO IR (`.xml`) or an `.onnx` file — the program reads the class names from the model and picks the right post-processing automatically.
+A single C++ application that runs **every [Ultralytics YOLO](https://docs.ultralytics.com) task and model generation** with the [Intel OpenVINO™ toolkit](https://docs.openvino.ai/) and [OpenCV](https://opencv.org/). Point it at an OpenVINO IR (`.xml`) or an `.onnx` file — the program reads the class names from the model and picks the right post-processing automatically.
 
 ## ✨ Features
 
-- **All tasks:** [detect](https://docs.ultralytics.com/tasks/detect), [segment](https://docs.ultralytics.com/tasks/segment), [pose](https://docs.ultralytics.com/tasks/pose), [OBB](https://docs.ultralytics.com/tasks/obb), [classify](https://docs.ultralytics.com/tasks/classify), and YOLO26 semantic segmentation.
-- **All generations:** [YOLOv8](https://docs.ultralytics.com/models/yolov8), [YOLO11](https://docs.ultralytics.com/models/yolo11), and [YOLO26](https://docs.ultralytics.com/models/yolo26). Grid (YOLOv8/11) and end-to-end (YOLO26) outputs are detected automatically from the tensor shape.
+- **All tasks:** [detect](https://docs.ultralytics.com/tasks/detect), [segment](https://docs.ultralytics.com/tasks/segment), [pose](https://docs.ultralytics.com/tasks/pose), [OBB](https://docs.ultralytics.com/tasks/obb), [classify](https://docs.ultralytics.com/tasks/classify), and Ultralytics YOLO26 semantic segmentation.
+- **All generations:** [Ultralytics YOLOv8](https://docs.ultralytics.com/models/yolov8), [Ultralytics YOLO11](https://docs.ultralytics.com/models/yolo11), and [Ultralytics YOLO26](https://docs.ultralytics.com/models/yolo26). Grid (YOLOv8/11) and end-to-end (YOLO26) outputs are detected automatically from the tensor shape.
 - **Two formats:** OpenVINO IR (`.xml`/`.bin`) and [ONNX](https://onnx.ai/) — the OpenVINO runtime reads both.
 - **Automatic task detection:** the IR carries no `task` field, so the task is inferred from the output shapes and class-label count. Class names come from the IR `rt_info` (`labels`); models without that metadata fall back to the 80 COCO names in [`../common`](../common).
 - **Shared post-processing:** the parsing/NMS/mask/keypoint/semantic logic is the same `common/yolo_postprocess.hpp` used by the other examples.
@@ -18,7 +18,7 @@ A single C++ application that runs **every [Ultralytics YOLO](https://docs.ultra
 | ----------------------------------------- | -------- |
 | [OpenVINO](https://docs.openvino.ai/)     | >=2023.3 |
 | [OpenCV](https://opencv.org/)             | >=4.5.0  |
-| [C++](https://en.cppreference.com/w/)     | >=17     |
+| [C++](https://en.cppreference.com/)       | >=17     |
 | [CMake](https://cmake.org/documentation/) | >=3.12.0 |
 
 ## 📦 Exporting a Model

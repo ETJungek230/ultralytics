@@ -160,8 +160,6 @@ Finally, implement the `run_inference` function that will handle the object dete
 ```python
 def run_inference(input_image: Image.Image, confidence_threshold: float = 0.5) -> Dict[str, Any]:
     """Run inference on an image using YOLO26n model."""
-    global model_yolo
-
     # Check if model is ready
     if not is_model_ready():
         print("Model not ready for inference")
@@ -565,7 +563,7 @@ Once the deployment is complete, Vertex AI will provide you with a sample API in
 To test remote inference, you can use the provided cURL command or create another Python client library that will send requests to the deployed model. Remember that you need to encode your image to base64 before sending it to the `/predict` endpoint.
 
 <p align="center">
-  <img width="50%" src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/vertex-ai-endpoint-test-curl-yolo11.avif" alt="Vertex AI endpoint testing with cURL">
+  <img width="50%" src="https://cdn.ul.run/i/2d19033337090867ab19758d3ce5a973.avif" alt="Vertex AI endpoint testing with cURL">
 </p>
 
 !!! note "Expect a short delay on the first request"

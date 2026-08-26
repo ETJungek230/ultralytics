@@ -10,7 +10,7 @@ A C++ application that runs Ultralytics YOLO ONNX models with the [OpenCV DNN mo
 ## ✨ Features
 
 - **All tasks (grid models):** [detect](https://docs.ultralytics.com/tasks/detect), [segment](https://docs.ultralytics.com/tasks/segment), [pose](https://docs.ultralytics.com/tasks/pose), [OBB](https://docs.ultralytics.com/tasks/obb), [classify](https://docs.ultralytics.com/tasks/classify), and semantic segmentation.
-- **All generations (grid):** [YOLOv8](https://docs.ultralytics.com/models/yolov8), [YOLO11](https://docs.ultralytics.com/models/yolo11), and [YOLO26](https://docs.ultralytics.com/models/yolo26) with its end-to-end head disabled. The OpenCV DNN module cannot run the YOLO26 end-to-end (NMS-in-graph) operators.
+- **All generations (grid):** [Ultralytics YOLOv8](https://docs.ultralytics.com/models/yolov8), [Ultralytics YOLO11](https://docs.ultralytics.com/models/yolo11), and [Ultralytics YOLO26](https://docs.ultralytics.com/models/yolo26) with its end-to-end head disabled. The OpenCV DNN module cannot run the YOLO26 end-to-end (NMS-in-graph) operators.
 - **Zero configuration:** OpenCV exposes no model metadata, so the task is inferred from the output shapes and class names fall back to COCO (pass `--task` for grid pose/obb).
 - **CPU or CUDA:** runs on the OpenCV DNN CPU backend, or the CUDA backend with `--cuda` (requires a CUDA-enabled OpenCV).
 
@@ -19,7 +19,7 @@ A C++ application that runs Ultralytics YOLO ONNX models with the [OpenCV DNN mo
 | Dependency                                        | Version  | Description                                                 |
 | :------------------------------------------------ | :------- | :---------------------------------------------------------- |
 | [OpenCV](https://opencv.org/)                     | >=4.7.0  | DNN module for inference, plus image I/O, drawing, and NMS. |
-| [C++](https://en.cppreference.com/w/)             | >=17     | Modern C++ compiler.                                        |
+| [C++](https://en.cppreference.com/)               | >=17     | Modern C++ compiler.                                        |
 | [CMake](https://cmake.org/documentation/)         | >=3.5    | Build system.                                               |
 | [CUDA](https://developer.nvidia.com/cuda/toolkit) | optional | Only for the OpenCV CUDA DNN backend (`--cuda`).            |
 

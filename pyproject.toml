@@ -19,7 +19,7 @@
 # For comprehensive documentation and usage instructions, visit: https://docs.ultralytics.com
 
 [build-system]
-requires = ["setuptools>=70.0.0,<=82.0.1", "wheel"]
+requires = ["setuptools>=70.0.0,<=84.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 # Project settings -----------------------------------------------------------------------------------------------------
@@ -62,9 +62,11 @@ classifiers = [
 
 # Required dependencies ------------------------------------------------------------------------------------------------
 dependencies = [
-    "numpy>=1.23.0",
+    "filelock>=3.16.1",
+    "numpy>=1.23.0; platform_system != 'Darwin'",
+    "numpy>=1.23.0,!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.0,!=2.3.1,!=2.3.2,!=2.3.3,!=2.3.4; platform_system == 'Darwin'",  # Accelerate matmul bug fixed in 2.3.5
     "matplotlib>=3.3.0",
-    "opencv-python>=4.6.0,!=4.13.0.90", # 4.13.0.90 FIPS selftest crash https://github.com/ultralytics/ultralytics/issues/23373
+    "opencv-python>=4.7.0,!=4.13.0.90", # 4.13.0.90 FIPS selftest crash https://github.com/ultralytics/ultralytics/issues/23373
     "pillow>=7.1.2",
     "pyyaml>=5.3.1",
     "requests>=2.23.0",
@@ -74,7 +76,8 @@ dependencies = [
     "psutil>=5.8.0", # system utilization
     "polars>=0.20.0",
     "nvidia-ml-py>=12.0.0", # NVIDIA GPU monitoring https://pypi.org/project/nvidia-ml-py
-    "ultralytics-thop>=2.0.18", # FLOPs computation https://github.com/ultralytics/thop
+    "ultralytics-thop>=2.1.6", # FLOPs computation https://github.com/ultralytics/thop
+    "ultralytics-platform>=0.1.3; python_version >= '3.11'",
 ]
 
 # Optional dependencies ------------------------------------------------------------------------------------------------
@@ -85,8 +88,7 @@ dev = [
     "pytest-cov",
     "pytest-xdist>=3.0.0",
     "coverage[toml]",
-    "zensical>=0.0.15; python_version >= '3.10'",
-    "mkdocs-ultralytics-plugin>=0.2.5", # for meta descriptions and images, dates and authors
+    "zensical>=0.0.53; python_version >= '3.10'",
     "minijinja>=2.0.0", # render docs macros without mkdocs-macros-plugin
 ]
 export-base = [
@@ -97,13 +99,14 @@ export-base = [
     # ONNX export validation and inference. Jetson jobs provide custom aarch64 onnxruntime-gpu wheels.
     "onnxruntime<1.20.0; python_version < '3.11' and (platform_machine != 'aarch64' or platform_system != 'Linux')",
     "onnxruntime>=1.20.0; python_version >= '3.11'",
-    "nncf>=2.14.0,<3.0.0; python_version >= '3.9'",  # OpenVINO INT8 export
+    "nncf>=2.14.0,<4.0.0; python_version >= '3.9'",  # OpenVINO INT8 export
     "openvino>=2024.0.0",  # OpenVINO export
     "packaging>=26.0; platform_machine == 'aarch64' and platform_system == 'Linux' and python_version >= '3.9'", # IMX export bug
 ]
 export-legacy-torch = [
     "numpy<2",
     "setuptools<81.0.0; python_version >= '3.9'",  # legacy torch's torch_version imports pkg_resources, removed in setuptools>=81
+    "nncf<3.0.0; python_version >= '3.9'",  # nncf>=3 reads torch.uint16, added in torch 2.3
 ]
 export-tensorflow = [
     "numpy<2.0.0; python_version < '3.13'", # TF 2.20 compatibility
@@ -115,12 +118,13 @@ export-tensorflow = [
     "h5py!=3.11.0; platform_machine == 'aarch64'", # fix h5py build issues due to missing aarch64 wheels in 3.11 release
 ]
 export-coreml = [
-    "numpy<=2.3.5; python_version >= '3.13'",  # pin until CoreML>9.0 new release
+    "numpy<=2.3.5; platform_system != 'Windows' and python_version <= '3.13'",  # pin until CoreML>9.0 fixes numpy>=2.4 int() cast crash
     "coremltools>=9.0; platform_system != 'Windows' and python_version <= '3.13'", # CoreML supported on macOS and Linux
     "scikit-learn>=1.3.2; platform_system != 'Windows' and python_version <= '3.13'", # CoreML k-means quantization
 ]
 export-executorch = [
     "executorch",
+    "torch>=2.12.0,<2.13.0; platform_system == 'Linux' and platform_machine == 'aarch64'",
     "numpy<=2.3.5",
 ]
 export-deepx = [
@@ -137,6 +141,8 @@ export = [
     "ultralytics[export-tensorflow]",
     "ultralytics[export-coreml]",
     "ultralytics[export-litert]",
+    # Raspberry Pi Python 3.11 ExecuTorch inference requires the last known-good Linux ARM64 Torch 2.12 stack.
+    "torch>=2.12.0,<2.13.0; platform_system == 'Linux' and platform_machine == 'aarch64' and python_version == '3.11'",
 ]
 solutions = [
     "shapely>=2.0.0",    # shapely for point and polygon data matching
@@ -146,10 +152,13 @@ solutions = [
     "streamlit>=1.29.0,<1.51.0; python_version < '3.10' and (platform_machine != 'aarch64' or platform_system != 'Linux')",
     "flask>=3.0.1",  # for similarity search solution
 ]
+llm = [
+    "openai>=2.0.0",
+]
 logging = [
-    "wandb", # https://docs.ultralytics.com/integrations/weights-biases/
-    "tensorboard",  # https://docs.ultralytics.com/integrations/tensorboard/
-    "mlflow",  # https://docs.ultralytics.com/integrations/mlflow/
+    "wandb", # https://docs.ultralytics.com/integrations/weights-biases
+    "tensorboard",  # https://docs.ultralytics.com/integrations/tensorboard
+    "mlflow",  # https://docs.ultralytics.com/integrations/mlflow
 ]
 extra = [
     "ipython", # interactive notebook
@@ -212,6 +221,7 @@ split_before_first_argument = false
 
 [tool.ruff]
 line-length = 120
+target-version = "py38"
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -227,5 +237,5 @@ close-quotes-on-newline = true
 in-place = true
 
 [tool.codespell]
-ignore-words-list = "grey,writeable,finalY,RepResNet,Idenfy,WIT,Smoot,EHR,ROUGE,ALS,iTerm,Carmel,FPR,Hach,Calle,ore,COO,MOT,crate,nd,ned,strack,dota,ane,segway,fo,gool,winn,commend,bloc,nam,afterall,skelton,goin,alls"
+ignore-words-list = "grey,writeable,finalY,RepResNet,Idenfy,WIT,Smoot,EHR,ROUGE,ALS,iTerm,Carmel,FPR,Hach,Calle,ore,COO,MOT,crate,nd,ned,strack,dota,ane,segway,fo,gool,winn,commend,bloc,nam,afterall,skelton,goin,alls,manger,trough,cann"
 skip = "*.pt,*.pth,*.torchscript,*.onnx,*.tflite,*.pb,*.bin,*.param,*.mlmodel,*.engine,*.npy,*.data*,*.csv,*pnnx*,*venv*,*translat*,*lock*,__pycache__*,*.ico,*.jpg,*.png,*.webp,*.avif,*.mp4,*.mov,/runs,/.git,./docs/??/*.md,./docs/mkdocs_??.yml"

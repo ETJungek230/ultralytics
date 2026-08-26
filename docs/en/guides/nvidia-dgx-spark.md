@@ -10,7 +10,7 @@ keywords: Ultralytics, YOLO26, NVIDIA DGX Spark, AI deployment, performance benc
 This comprehensive guide provides a detailed walkthrough for deploying Ultralytics YOLO26 on [NVIDIA DGX Spark](https://www.nvidia.com/en-us/products/workstations/dgx-spark/), NVIDIA's compact desktop AI supercomputer. Additionally, it showcases performance benchmarks to demonstrate the capabilities of YOLO26 on this powerful system.
 
 <p align="center">
-  <img width="1024" src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/nvidia-dgx-spark.avif" alt="NVIDIA DGX Spark AI workstation overview">
+  <img width="1024" src="https://cdn.ul.run/i/9d933b901c065efa24a018b74f4194f8.avif" alt="NVIDIA DGX Spark AI workstation overview">
 </p>
 
 !!! note
@@ -66,7 +66,7 @@ DGX Spark comes with a built-in [DGX Dashboard](https://docs.nvidia.com/dgx/dgx-
 - **Integrated JupyterLab**: Access local Jupyter Notebooks for development
 
 <p align="center">
-  <img width="1024" src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/nvidia-dgx-dashboard.avif" alt="NVIDIA DGX management dashboard interface">
+  <img width="1024" src="https://cdn.ul.run/i/e01bd76ad1c4044ec866f4fad213795b.avif" alt="NVIDIA DGX management dashboard interface">
 </p>
 
 #### Accessing the Dashboard
@@ -146,7 +146,7 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 
     When running PyTorch 2.9.1 on NVIDIA DGX Spark, you may encounter the following `UserWarning` when initializing CUDA (e.g. running `yolo checks`, `yolo predict`, etc.):
 
-    ```
+    ```text
     UserWarning: Found GPU0 NVIDIA GB10 which is of cuda capability 12.1.
     Minimum and Maximum cuda capability supported by this version of PyTorch is (8.0) - (12.0)
     ```
