@@ -39,6 +39,7 @@ from ultralytics.nn.modules import (
     C3Ghost,
     C3k2,
     C3x,
+    PConvC3k2,
     CBFuse,
     CBLinear,
     Classify,
@@ -50,6 +51,7 @@ from ultralytics.nn.modules import (
     Detect,
     DWConv,
     DWConvTranspose2d,
+    DualConv,
     Focus,
     GhostBottleneck,
     GhostConv,
@@ -246,7 +248,7 @@ class BaseModel(torch.nn.Module):
         """
         if not self.is_fused():
             for m in self.model.modules():
-                if isinstance(m, (Conv, Conv2, DWConv)) and hasattr(m, "bn"):
+                if isinstance(m, (Conv, Conv2, DWConv, DualConv)) and hasattr(m, "bn"):
                     if isinstance(m, Conv2):
                         m.fuse_convs()
                     m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
@@ -1994,6 +1996,7 @@ def parse_model(d, ch, verbose=True):
             Conv,
             ConvTranspose,
             GhostConv,
+            DualConv,
             Bottleneck,
             GhostBottleneck,
             SPP,
@@ -2007,6 +2010,7 @@ def parse_model(d, ch, verbose=True):
             C2,
             C2f,
             C3k2,
+            PConvC3k2,
             RepNCSPELAN4,
             ELAN1,
             ADown,
@@ -2034,6 +2038,7 @@ def parse_model(d, ch, verbose=True):
             C2,
             C2f,
             C3k2,
+            PConvC3k2,
             C2fAttn,
             C3,
             C3TR,
@@ -2080,7 +2085,7 @@ def parse_model(d, ch, verbose=True):
             if m in repeat_modules:
                 args.insert(2, n)  # number of repeats
                 n = 1
-            if m is C3k2:  # for M/L/X sizes
+            if m is C3k2 or m is PConvC3k2:  # for M/L/X sizes
                 legacy = False
                 if scale in "mlx":
                     args[3] = True

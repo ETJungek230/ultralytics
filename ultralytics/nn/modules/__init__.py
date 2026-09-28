@@ -44,6 +44,7 @@ from .block import (
     C3Ghost,
     C3k2,
     C3x,
+    PConvC3k2,
     CBFuse,
     CBLinear,
     ContrastiveHead,
@@ -75,6 +76,7 @@ from .conv import (
     LightConv,
     RepConv,
     SpatialAttention,
+    DualConv,
 )
 from .head import (
     OBB,
@@ -141,6 +143,7 @@ __all__ = (
     "C3Ghost",
     "C3k2",
     "C3x",
+    "PConvC3k2",
     "CBFuse",
     "CBLinear",
     "ChannelAttention",
@@ -183,6 +186,7 @@ __all__ = (
     "Segment26",
     "SemanticSegment",
     "SpatialAttention",
+    "DualConv",
     "TorchVision",
     "TransformerBlock",
     "TransformerEncoderLayer",

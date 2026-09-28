@@ -668,3 +668,132 @@ class Index(nn.Module):
             (torch.Tensor): Selected tensor.
         """
         return x[self.index]
+
+
+class PartialConv3(nn.Module):
+    """
+    Partial 3x3 convolution.
+
+    Only a fraction of the input channels are processed by
+    a 3x3 convolution. The remaining channels bypass the
+    spatial convolution.
+
+    Args:
+        dim: Number of input/output channels.
+        n_div: Channel division factor.
+        forward_mode: "split_cat" or "slicing".
+    """
+
+    def __init__(
+            self,
+            dim: int,
+            n_div: int = 4,
+            forward_mode: str = "split_cat",
+    ):
+        super().__init__()
+        assert dim >= n_div, (
+            f"dim ({dim}) must be >= n_div ({n_div})"
+        )
+        self.dim = dim
+        self.n_div = n_div
+        self.dim_conv3 = dim // n_div
+        self.dim_untouched = dim - self.dim_conv3
+
+        # Partial 3x3 convolution
+        self.partial_conv3 = Conv(
+            self.dim_conv3,
+            self.dim_conv3,
+            k=3,
+            s=1,
+        )
+
+        if forward_mode == "slicing":
+            self.forward = self.forward_slicing
+
+        elif forward_mode == "split_cat":
+            self.forward = self.forward_split_cat
+
+        else:
+            raise NotImplementedError(
+                f"Unsupported forward mode: {forward_mode}"
+            )
+
+    def forward_slicing(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Inference-oriented implementation.
+
+        The first dim_conv3 channels are processed by
+        the 3x3 convolution. The remaining channels
+        remain unchanged.
+        """
+
+        x = x.clone()
+        x[:, :self.dim_conv3] = self.partial_conv3(
+            x[:, :self.dim_conv3]
+        )
+        return x
+
+    def forward_split_cat(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Training/inference implementation.
+        """
+
+        x1, x2 = torch.split(
+            x,
+            [self.dim_conv3, self.dim_untouched],
+            dim=1,
+        )
+        x1 = self.partial_conv3(x1)
+
+        return torch.cat((x1, x2), dim=1)
+
+
+class DualConv(nn.Module):
+    """
+    Dual Convolution block for YOLO.
+
+    Two parallel branches:
+
+        Branch 1:
+            3x3 Group Convolution
+
+        Branch 2:
+            1x1 Pointwise Convolution
+
+    The two branches are fused by element-wise addition.
+
+    Args:
+        c1 (int): Input channels.
+        c2 (int): Output channels.
+        k (int): Kernel size of the group convolution.
+                Default: 3.
+        s (int): Stride.
+                Default: 1.
+        g (int): Number of groups in the group convolution.
+                 Default: 4.
+    """
+
+    def __init__(self, c1: int, c2: int, k: int = 3, s: int = 1, g: int = 4):
+        super().__init__()
+        assert c1 % g == 0, (
+            f"Input channels c1={c1} must be divisible "
+            f"by groups g={g}"
+        )
+        assert c2 % g == 0, (
+            f"Output channels c2={c2} must be divisible "
+            f"by groups g={g}"
+        )
+        # Group convolution
+        self.conv_g = Conv(c1, c2, k=k, s=s, g=g)
+        # 1x1 Pointwise convolution
+        self.conv_pw = Conv(c1, c2, k=1, s=s)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass.
+
+        Both branches have identical spatial dimensions
+        and output channels, so element-wise addition is used.
+        """
+
+        return self.conv_g(x) + self.conv_pw(x)

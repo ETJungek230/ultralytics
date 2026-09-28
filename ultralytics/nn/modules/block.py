@@ -9,9 +9,11 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from timm.layers import DropPath
+
 from ultralytics.utils.torch_utils import fuse_conv_and_bn
 
-from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad
+from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad, PartialConv3
 from .transformer import TransformerBlock
 
 __all__ = (
@@ -40,6 +42,7 @@ __all__ = (
     "C3Ghost",
     "C3k2",
     "C3x",
+    "PConvC3k2",
     "CBFuse",
     "CBLinear",
     "ContrastiveHead",
@@ -1128,6 +1131,209 @@ class C3k(C3):
         c_ = int(c2 * e)  # hidden channels
         # self.m = nn.Sequential(*(RepBottleneck(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
         self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
+
+
+class PConvBlock(nn.Module):
+    """
+    FasterNet-style partial convolution block adapted
+    for the Ultralytics YOLO architecture.
+
+    Structure:
+
+        x
+        │
+        ├── PartialConv3
+        │
+        ├── 1x1 Conv
+        │
+        ├── 1x1 Conv
+        │
+        └── Residual
+    """
+
+    def __init__(
+            self,
+            dim: int,
+            n_div: int = 4,
+            mlp_ratio: float = 2.0,
+            drop_path: float = 0.0,
+            layer_scale_init_value: float = 0.0,
+            pconv_fw_type: str = "split_cat",
+    ):
+        super().__init__()
+        self.dim = dim
+        # -----------------------------------------
+        # Partial spatial mixing
+        # -----------------------------------------
+        self.spatial_mixing = PartialConv3(
+            dim=dim,
+            n_div=n_div,
+            forward_mode=pconv_fw_type,
+        )
+        # -----------------------------------------
+        # Point-wise MLP
+        # -----------------------------------------
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = nn.Sequential(
+            Conv(dim, mlp_hidden_dim, k=1, s=1),
+            Conv(mlp_hidden_dim, dim, k=1, s=1, act=False),
+        )
+        # -----------------------------------------
+        # DropPath
+        # -----------------------------------------
+        self.drop_path = (
+            DropPath(drop_path)
+            if drop_path > 0.0
+            else nn.Identity()
+        )
+        # -----------------------------------------
+        # Layer scale
+        # -----------------------------------------
+        if layer_scale_init_value > 0.0:
+            self.layer_scale = nn.Parameter(
+                layer_scale_init_value
+                * torch.ones(dim),
+                requires_grad=True,
+            )
+        else:
+            self.layer_scale = None
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        shortcut = x
+        # Partial spatial mixing
+        x = self.spatial_mixing(x)
+        # Point-wise MLP
+        x = self.mlp(x)
+        # Layer scale
+        if self.layer_scale is not None:
+            x = (self.layer_scale.unsqueeze(-1).unsqueeze(-1) * x)
+        # Residual connection
+        x = shortcut + self.drop_path(x)
+
+        return x
+
+
+class PConvC3k(C3):
+    """
+    C3 block with PConvBlock replacing Bottleneck.
+    """
+
+    def __init__(
+            self,
+            c1: int,
+            c2: int,
+            n: int = 1,
+            shortcut: bool = True,
+            g: int = 1,
+            e: float = 0.5,
+            n_div: int = 4,
+            mlp_ratio: float = 2.0,
+            drop_path: float = 0.0,
+            layer_scale_init_value: float = 0.0,
+            pconv_fw_type: str = "split_cat",
+    ):
+        super().__init__(c1, c2, n, shortcut, g, e)
+        c_ = int(c2 * e)
+        self.m = nn.Sequential(
+            *[
+                PConvBlock(
+                    dim=c_,
+                    n_div=n_div,
+                    mlp_ratio=mlp_ratio,
+                    drop_path=drop_path,
+                    layer_scale_init_value=layer_scale_init_value,
+                    pconv_fw_type=pconv_fw_type,
+                )
+                for _ in range(n)
+            ]
+        )
+
+
+class PConvC3k2(C2f):
+    """
+    C3k2 with Partial Convolution blocks.
+
+    The external interface is kept compatible with the
+    local Ultralytics C3k2 implementation.
+
+    Args:
+        c1: Input channels.
+        c2: Output channels.
+        n: Number of blocks.
+        c3k: Whether to use PConvC3k blocks.
+        e: Expansion ratio.
+        attn: Whether to append PSABlock.
+        g: Groups.
+        shortcut: Whether to use shortcut connections.
+
+        n_div: Partial convolution division factor.
+        mlp_ratio: PConvBlock MLP expansion ratio.
+        drop_path: DropPath probability.
+        layer_scale_init_value: Layer scale initialization.
+        pconv_fw_type: PartialConv forward implementation.
+    """
+
+    def __init__(
+            self,
+            c1: int,
+            c2: int,
+            n: int = 1,
+            c3k: bool = False,
+            e: float = 0.5,
+            attn: bool = False,
+            g: int = 1,
+            shortcut: bool = True,
+
+            # PConv parameters
+            n_div: int = 4,
+            mlp_ratio: float = 2.0,
+            drop_path: float = 0.0,
+            layer_scale_init_value: float = 0.0,
+            pconv_fw_type: str = "split_cat",
+    ):
+        super().__init__(c1, c2, n, shortcut, g, e)
+        self.m = nn.ModuleList(
+            nn.Sequential(
+                PConvBlock(
+                    dim=self.c,
+                    n_div=n_div,
+                    mlp_ratio=mlp_ratio,
+                    drop_path=drop_path,
+                    layer_scale_init_value=layer_scale_init_value,
+                    pconv_fw_type=pconv_fw_type,
+                ),
+                PSABlock(
+                    self.c,
+                    attn_ratio=0.5,
+                    num_heads=max(self.c // 64, 1),
+                ),
+            )
+            if attn
+            else PConvC3k(
+                self.c,
+                self.c,
+                n=2,
+                shortcut=shortcut,
+                g=g,
+                e=1.0,
+
+                n_div=n_div,
+                mlp_ratio=mlp_ratio,
+                drop_path=drop_path,
+                layer_scale_init_value=layer_scale_init_value,
+                pconv_fw_type=pconv_fw_type,
+            )
+            if c3k
+            else PConvBlock(
+                dim=self.c,
+                n_div=n_div,
+                mlp_ratio=mlp_ratio,
+                drop_path=drop_path,
+                layer_scale_init_value=layer_scale_init_value,
+                pconv_fw_type=pconv_fw_type,
+            )
+            for _ in range(n)
+        )
 
 
 class RepVGGDW(torch.nn.Module):
