@@ -6,9 +6,11 @@ import os
 import shutil
 import sys
 import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import USER_CONFIG_DIR
+from .patches import torch_save
 from .torch_utils import TORCH_1_9
 
 if TYPE_CHECKING:
@@ -49,8 +51,8 @@ def find_free_network_port() -> int:
 def generate_ddp_file(trainer: BaseTrainer) -> str:
     """Generate a DDP (Distributed Data Parallel) file for multi-GPU training.
 
-    This function creates a temporary Python file that enables distributed training across multiple GPUs. The file
-    contains the necessary configuration to initialize the trainer in a distributed environment.
+    This function creates a temporary Python file that enables distributed training across multiple GPUs, plus a
+    companion `.pt` file holding the pickled trainer state that each DDP worker loads to rebuild the trainer.
 
     Args:
         trainer (ultralytics.engine.trainer.BaseTrainer): The trainer containing training configuration and arguments.
@@ -60,27 +62,12 @@ def generate_ddp_file(trainer: BaseTrainer) -> str:
         (str): Path to the generated temporary DDP file.
 
     Notes:
-        The generated file is saved in the USER_CONFIG_DIR/DDP directory and includes:
-        - Trainer class import
-        - Configuration overrides from the trainer arguments
-        - Training initialization code
+        Both files are saved in the USER_CONFIG_DIR/DDP directory:
+        - The `.pt` state file stores the trainer class, trainer arguments, model, and callbacks (via cloudpickle)
+        - The `.py` script loads that state, rebuilds the trainer with the saved arguments as overrides, and trains
     """
-    module, name = f"{trainer.__class__.__module__}.{trainer.__class__.__name__}".rsplit(".", 1)
+    import cloudpickle
 
-    content = f"""
-# Ultralytics Multi-GPU training temp file (should be automatically deleted after use)
-from pathlib import Path, PosixPath  # For model arguments stored as Path instead of str
-overrides = {vars(trainer.args)}
-
-if __name__ == "__main__":
-    from {module} import {name}
-    from ultralytics.utils import DEFAULT_CFG_DICT
-
-    cfg = DEFAULT_CFG_DICT.copy()
-    cfg.update(save_dir='')   # handle the extra key 'save_dir'
-    trainer = {name}(cfg=cfg, overrides=overrides)
-    results = trainer.train()
-"""
     (USER_CONFIG_DIR / "DDP").mkdir(exist_ok=True)
     with tempfile.NamedTemporaryFile(
         prefix="_temp_",
@@ -90,12 +77,44 @@ if __name__ == "__main__":
         dir=USER_CONFIG_DIR / "DDP",
         delete=False,
     ) as file:
-        file.write(content)
+        path = Path(file.name).with_suffix(".pt")
+        torch_save(
+            {
+                "trainer": type(trainer),
+                "args": vars(trainer.args),
+                "model": trainer.model,
+                "callbacks": trainer.callbacks,
+            },
+            path,
+            pickle_module=cloudpickle,
+        )
+        file.write(
+            f"""
+# Ultralytics Multi-GPU training temp file (should be automatically deleted after use)
+if __name__ == "__main__":
+    import sys
+    sys.path = {sys.path!r}
+
+    from ultralytics.utils import DEFAULT_CFG_DICT
+    from ultralytics.utils.patches import torch_load
+
+    state = torch_load({str(path)!r}, map_location="cpu")
+
+    cfg = DEFAULT_CFG_DICT.copy()
+    cfg.update(save_dir='')   # handle the extra key 'save_dir'
+    trainer = state["trainer"](cfg=cfg, overrides=state["args"], _callbacks=state["callbacks"])
+    trainer.model = state["model"]
+    trainer.train()
+"""
+        )
     return file.name
 
 
 def generate_ddp_command(trainer: BaseTrainer) -> tuple[list[str], str]:
     """Generate command for distributed training.
+
+    Removes the trainer's save directory unless resuming, writes the temporary DDP file, and selects a free port for the
+    `torch.distributed` launcher.
 
     Args:
         trainer (ultralytics.engine.trainer.BaseTrainer): The trainer containing configuration for distributed training.
@@ -104,8 +123,6 @@ def generate_ddp_command(trainer: BaseTrainer) -> tuple[list[str], str]:
         cmd (list[str]): The command to execute for distributed training.
         file (str): Path to the temporary file created for DDP training.
     """
-    import __main__  # noqa local import to avoid https://github.com/Lightning-AI/pytorch-lightning/issues/15218
-
     if not trainer.resume:
         shutil.rmtree(trainer.save_dir)  # remove the save_dir
     file = generate_ddp_file(trainer)
@@ -125,19 +142,22 @@ def generate_ddp_command(trainer: BaseTrainer) -> tuple[list[str], str]:
 
 
 def ddp_cleanup(trainer: BaseTrainer, file: str) -> None:
-    """Delete temporary file if created during distributed data parallel (DDP) training.
+    """Delete temporary files if created during distributed data parallel (DDP) training.
 
     This function checks if the provided file contains the trainer's ID in its name, indicating it was created as a
-    temporary file for DDP training, and deletes it if so.
+    temporary file for DDP training, and deletes it along with its companion `.pt` state file if so.
 
     Args:
         trainer (ultralytics.engine.trainer.BaseTrainer): The trainer used for distributed training.
         file (str): Path to the file that might need to be deleted.
 
     Examples:
-        >>> trainer = YOLOTrainer()
-        >>> file = "/tmp/ddp_temp_123456789.py"
-        >>> ddp_cleanup(trainer, file)
+        >>> from types import SimpleNamespace
+        >>> from ultralytics.utils.dist import ddp_cleanup, generate_ddp_file
+        >>> trainer = SimpleNamespace(args=SimpleNamespace(), model=None, callbacks={})  # minimal trainer stand-in
+        >>> file = generate_ddp_file(trainer)
+        >>> ddp_cleanup(trainer, file)  # deletes the temporary .py script and its .pt state file
     """
     if f"{id(trainer)}.py" in file:  # if temp_file suffix in file
         os.remove(file)
+        Path(file).with_suffix(".pt").unlink(missing_ok=True)  # the state written for the workers

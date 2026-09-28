@@ -5,7 +5,8 @@ creator:
     name: Global Wheat Dataset Consortium
     url: https://www.global-wheat.com/
 license:
-    name: None
+    name: MIT
+    url: https://api.datacite.org/dois/10.5281/zenodo.4298502
 description: Train YOLO26 on the Global Wheat Head Dataset — 3,422 train, 748 validation, and 1,276 test field images labeled with wheat head boxes for single-class detection.
 keywords: Global Wheat Head Dataset, GWHD, wheat head detection, wheat spike detection, wheat phenotyping, crop management, object detection, YOLO26, agriculture
 ---
@@ -33,7 +34,7 @@ The Global Wheat Head Dataset is organized into three subsets defined by the `Gl
 
 !!! note "Validation split"
 
-    The validation set (748 images) is the `ethz_1` subset, which is also part of the training domains — so validation metrics reflect in-domain performance. The held-out test set from Australia, Japan, and China measures generalization to environments unseen during training.
+    The validation set (748 images) is the `ethz_1` subset, which is also included in the training set — so validation metrics are measured on images the model also trains on. The held-out test set from Australia, Japan, and China measures generalization to environments unseen during training.
 
 ## Applications
 

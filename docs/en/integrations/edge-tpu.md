@@ -39,8 +39,6 @@ TFLite Edge TPU offers various deployment options for machine learning models, i
 
 - **On-Device Deployment**: TensorFlow Edge TPU models can be directly deployed on mobile and embedded devices. On-device deployment allows the models to execute directly on the hardware, eliminating the need for cloud connectivity, either by embedding the model in the application bundle or downloading it on demand.
 
-- **Edge Computing with Cloud TensorFlow TPUs**: In scenarios where edge devices have limited processing capabilities, TensorFlow Edge TPUs can offload inference tasks to cloud servers equipped with TPUs.
-
 - **Hybrid Deployment**: A hybrid approach combines on-device and cloud deployment and offers a versatile and scalable solution for deploying machine learning models. Advantages include on-device processing for quick responses and [cloud computing](https://www.ultralytics.com/glossary/cloud-computing) for more complex computations.
 
 ## Supported Tasks
@@ -88,14 +86,14 @@ The TFLite Edge TPU format supports the [Export](../modes/export.md), [Predict](
         model = YOLO("yolo26n.pt")
 
         # Export the model to TFLite Edge TPU format
-        model.export(format="edgetpu")  # creates 'yolo26n_full_integer_quant_edgetpu.tflite'
+        model.export(format="edgetpu")  # creates 'yolo26n_saved_model/yolo26n_full_integer_quant_edgetpu.tflite'
         ```
 
     === "CLI"
 
         ```bash
         # Export a YOLO26n PyTorch model to TFLite Edge TPU format
-        yolo export model=yolo26n.pt format=edgetpu # creates 'yolo26n_full_integer_quant_edgetpu.tflite'
+        yolo export model=yolo26n.pt format=edgetpu # creates 'yolo26n_saved_model/yolo26n_full_integer_quant_edgetpu.tflite'
         ```
 
 !!! example "Predict"
@@ -106,7 +104,7 @@ The TFLite Edge TPU format supports the [Export](../modes/export.md), [Predict](
         from ultralytics import YOLO
 
         # Load the exported TFLite Edge TPU model
-        model = YOLO("yolo26n_full_integer_quant_edgetpu.tflite")
+        model = YOLO("yolo26n_saved_model/yolo26n_full_integer_quant_edgetpu.tflite")
 
         # Run inference
         results = model("https://ultralytics.com/images/bus.jpg")
@@ -116,7 +114,7 @@ The TFLite Edge TPU format supports the [Export](../modes/export.md), [Predict](
 
         ```bash
         # Run inference with the exported TFLite Edge TPU model
-        yolo predict model=yolo26n_full_integer_quant_edgetpu.tflite source='https://ultralytics.com/images/bus.jpg'
+        yolo predict model=yolo26n_saved_model/yolo26n_full_integer_quant_edgetpu.tflite source='https://ultralytics.com/images/bus.jpg'
         ```
 
 !!! example "Validate"
@@ -127,7 +125,7 @@ The TFLite Edge TPU format supports the [Export](../modes/export.md), [Predict](
         from ultralytics import YOLO
 
         # Load the exported TFLite Edge TPU model
-        model = YOLO("yolo26n_full_integer_quant_edgetpu.tflite")
+        model = YOLO("yolo26n_saved_model/yolo26n_full_integer_quant_edgetpu.tflite")
 
         # Validate accuracy on the COCO8 dataset
         metrics = model.val(data="coco8.yaml")
@@ -137,24 +135,24 @@ The TFLite Edge TPU format supports the [Export](../modes/export.md), [Predict](
 
         ```bash
         # Validate the exported TFLite Edge TPU model
-        yolo val model=yolo26n_full_integer_quant_edgetpu.tflite data=coco8.yaml
+        yolo val model=yolo26n_saved_model/yolo26n_full_integer_quant_edgetpu.tflite data=coco8.yaml
         ```
 
 ### Export Arguments
 
-| Argument   | Type             | Default     | Description                                                                                                                                                                                                                                                             |
-| ---------- | ---------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `format`   | `str`            | `'edgetpu'` | Target format for the exported model, defining compatibility with various deployment environments.                                                                                                                                                                      |
-| `imgsz`    | `int` or `tuple` | `640`       | Desired image size for the model input. Can be an integer for square images or a tuple `(height, width)` for specific dimensions.                                                                                                                                       |
-| `quantize` | `int` or `str`   | `8`/auto    | Quantization precision. `8` (INT8) is required and auto-enabled for Edge TPU, compressing the model and speeding up inference with minimal [accuracy](https://www.ultralytics.com/glossary/accuracy) loss on edge devices. Replaces the deprecated `half`/`int8` flags. |
-| `opset`    | `int`            | `None`      | Specifies the ONNX opset version for the intermediate ONNX graph. If not set, uses the latest supported version.                                                                                                                                                        |
-| `data`     | `str`            | `None`      | Path to the [dataset](../datasets/index.md) YAML, essential for quantization; classification instead takes a dataset directory or a built-in dataset name. If omitted with `quantize=8`, Ultralytics selects the default calibration dataset for the model task.        |
-| `fraction` | `float`          | `1.0`       | Specifies the fraction of the dataset to use for INT8 quantization calibration. Allows for calibrating on a subset of the full dataset, useful for experiments or when resources are limited. If not specified with INT8 enabled, the full dataset will be used.        |
-| `device`   | `str`            | `None`      | Specifies the device for exporting: CPU (`device=cpu`).                                                                                                                                                                                                                 |
+| Argument   | Type                      | Default     | Description                                                                                                                                                                                                                                                             |
+| ---------- | ------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `format`   | `str`                     | `'edgetpu'` | Target format for the exported model, defining compatibility with various deployment environments.                                                                                                                                                                      |
+| `imgsz`    | `int` or `tuple`          | `640`       | Desired image size for the model input. Can be an integer for square images or a tuple `(height, width)` for specific dimensions.                                                                                                                                       |
+| `quantize` | `int` or `str`            | `8`/auto    | Quantization precision. `8` (INT8) is required and auto-enabled for Edge TPU, compressing the model and speeding up inference with minimal [accuracy](https://www.ultralytics.com/glossary/accuracy) loss on edge devices. Replaces the deprecated `half`/`int8` flags. |
+| `opset`    | `int`                     | `None`      | Specifies the ONNX opset version for the intermediate ONNX graph. If not set, uses the latest supported version.                                                                                                                                                        |
+| `data`     | `str`                     | `None`      | Path to the [dataset](../datasets/index.md) YAML, essential for quantization; classification instead takes a dataset directory or a built-in dataset name. If omitted with `quantize=8`, Ultralytics selects the default calibration dataset for the model task.        |
+| `fraction` | `float`, `int`, or `list` | `1.0`       | Calibration subset as a ratio, image count, or `[train, val, test]` ratios/counts. Two-item lists leave `test` full, while `0` skips it.                                                                                                                                |
+| `device`   | `str`                     | `None`      | Specifies the device for exporting: CPU (`device=cpu`).                                                                                                                                                                                                                 |
 
 !!! tip
 
-    Please make sure to use an x86 Linux machine when exporting to EdgeTPU.
+    Please make sure to use an x86 Linux machine when exporting to Edge TPU.
 
 For more details about the export process, visit the [Ultralytics documentation page on exporting](../modes/export.md).
 
@@ -174,7 +172,7 @@ However, for in-depth instructions on deploying your TFLite Edge TPU models, tak
 
 In this guide, we've learned how to export Ultralytics YOLO26 models to TFLite Edge TPU format. By following the steps mentioned above, you can increase the speed and power of your [computer vision](https://www.ultralytics.com/glossary/computer-vision-cv) applications.
 
-For further details on usage, visit the [Edge TPU official website](https://cloud.google.com/tpu).
+For further details on usage, visit the [Coral Edge TPU official website](https://developers.google.com/coral).
 
 Also, for more information on other Ultralytics YOLO26 integrations, please visit our [integration guide page](index.md). There, you'll discover valuable resources and insights.
 
@@ -195,10 +193,10 @@ To export a YOLO26 model to TFLite Edge TPU format, you can follow these steps:
         model = YOLO("yolo26n.pt")
 
         # Export the model to TFLite Edge TPU format
-        model.export(format="edgetpu")  # creates 'yolo26n_full_integer_quant_edgetpu.tflite'
+        model.export(format="edgetpu")  # creates 'yolo26n_saved_model/yolo26n_full_integer_quant_edgetpu.tflite'
 
         # Load the exported TFLite Edge TPU model
-        edgetpu_model = YOLO("yolo26n_full_integer_quant_edgetpu.tflite")
+        edgetpu_model = YOLO("yolo26n_saved_model/yolo26n_full_integer_quant_edgetpu.tflite")
 
         # Run inference
         results = edgetpu_model("https://ultralytics.com/images/bus.jpg")
@@ -208,10 +206,10 @@ To export a YOLO26 model to TFLite Edge TPU format, you can follow these steps:
 
         ```bash
         # Export a YOLO26n PyTorch model to TFLite Edge TPU format
-        yolo export model=yolo26n.pt format=edgetpu # creates 'yolo26n_full_integer_quant_edgetpu.tflite'
+        yolo export model=yolo26n.pt format=edgetpu # creates 'yolo26n_saved_model/yolo26n_full_integer_quant_edgetpu.tflite'
 
         # Run inference with the exported model
-        yolo predict model=yolo26n_full_integer_quant_edgetpu.tflite source='https://ultralytics.com/images/bus.jpg'
+        yolo predict model=yolo26n_saved_model/yolo26n_full_integer_quant_edgetpu.tflite source='https://ultralytics.com/images/bus.jpg'
         ```
 
 For complete details on exporting models to other formats, refer to our [export guide](../modes/export.md).

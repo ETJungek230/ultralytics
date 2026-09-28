@@ -18,7 +18,16 @@ class HailoBackend(BaseBackend):
     """HailoRT inference backend for Ultralytics Hailo HEF models."""
 
     def load_model(self, weight: str | Path) -> None:
-        """Load a Hailo export directory and its Ultralytics metadata."""
+        """Load a Hailo export directory and its Ultralytics metadata.
+
+        Args:
+            weight (str | Path): Path to the Hailo model directory containing the .hef file.
+
+        Raises:
+            ImportError: If HailoRT (`hailo_platform`) is not installed.
+            FileNotFoundError: If no .hef file is found in the given directory.
+            ValueError: If the model task is not supported by the Hailo backend.
+        """
         try:
             from hailo_platform import (
                 HEF,
@@ -66,16 +75,23 @@ class HailoBackend(BaseBackend):
             from ultralytics.nn.modules import DFL
 
             self._dfl = DFL()
-        # segmentation, pose and OBB return a dense tensor for the predictor's NMS; detect and classify do not
-        self.end2end = self.task not in {"segment", "pose", "obb"}
+        self.end2end = self.end2end or self.metadata.get("nms", False)  # head selection or HailoRT NMS
 
     def __del__(self):
         """Release the Hailo pipeline and device."""
         if stack := getattr(self, "_stack", None):
             stack.close()
 
-    def forward(self, im: torch.Tensor) -> np.ndarray | list[torch.Tensor]:
-        """Run Hailo inference and return decoded detections, or dense outputs and prototypes for segmentation."""
+    def forward(self, im: torch.Tensor) -> np.ndarray | torch.Tensor | list[torch.Tensor]:
+        """Run Hailo inference and decode the raw outputs on the host into the predictor's expected format.
+
+        Args:
+            im (torch.Tensor): Input image tensor in BCHW format, normalized to [0, 1].
+
+        Returns:
+            (np.ndarray | torch.Tensor | list[torch.Tensor]): Decoded detections, dense outputs (plus prototypes for
+                segmentation), class probabilities, semantic logits or class map, or a depth map, depending on task.
+        """
         im = np.ascontiguousarray(np.clip(im.permute(0, 2, 3, 1).cpu().numpy() * 255, 0, 255).astype(np.uint8))
         results = self.model.infer({self.input_info.name: im})
         outputs = [results[x.name] for x in self.output_infos]
@@ -183,8 +199,10 @@ class HailoBackend(BaseBackend):
             self._anchors = make_anchors(box_maps, strides)
         anchors, stride_tensor = self._anchors
         boxes = torch.cat([x.flatten(2) for x in box_maps], 2).transpose(1, 2)
-        boxes = dist2bbox(boxes, anchors, xywh=False) * stride_tensor
+        boxes = dist2bbox(boxes, anchors, xywh=not self.end2end) * stride_tensor
         scores = torch.cat([x.flatten(2) for x in cls_maps], 2).transpose(1, 2).sigmoid()
+        if not self.end2end:
+            return torch.cat((boxes, scores), 2).transpose(1, 2).numpy()
         classes = scores.shape[2]
         anchor_index = scores.amax(-1).topk(min(300, scores.shape[1]), dim=1).indices[..., None]
         boxes = boxes.gather(1, anchor_index.expand(-1, -1, 4))

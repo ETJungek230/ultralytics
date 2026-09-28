@@ -26,7 +26,7 @@ graph LR
 
 !!! info "Anonymous Access"
 
-    The Explore page works without signing in. Signed-out visitors get **Datasets** and **Models** sections in the sidebar listing official `@ultralytics` content, in place of the **Annotate**, **Train**, and **Deploy** sections that hold your own work. Public models can even be tested in the browser from their `Predict` tab. To clone content or create your own, you'll need to sign up.
+    The Explore page works without signing in. Signed-out visitors get **Datasets** and **Models** sections in the sidebar listing official `@ultralytics` content, in place of the **Annotate**, **Train**, and **Deployments** sections that hold your own work. Public models can even be tested in the browser from their `Predict` tab. To clone content or create your own, you'll need to sign up.
 
 ## Overview
 
@@ -104,37 +104,38 @@ column headers and its own pagination controls.
 Each item displays:
 
 ![Ultralytics Platform Explore Dataset And Project Cards](https://cdn.ul.run/i/6d245bbadc0f8f3870cfd3659d6591a0.avif)<!-- screenshot -->
+
 === "Project Cards"
 
-    | Element         | Description                                                   |
-    | --------------- | ------------------------------------------------------------- |
-    | **Icon**        | Project icon with custom color, letter, or cover image        |
-    | **Name**        | Project title                                                 |
-    | **Creator**     | Author avatar and username                                    |
-    | **Description** | Short project description                                     |
-    | **Star Count**  | Number of community stars (shown when above zero)             |
-    | **Model Count** | Number of models in the project                               |
-    | **Size**        | Total storage used by the project's model files               |
-    | **Updated**     | Date the project last changed                                 |
-    | **Model Tags**  | Names of the first few models in the project                  |
-    | **Tags**        | Project tags                                                  |
+    | Element         | Description                                            |
+    | --------------- | ------------------------------------------------------ |
+    | **Icon**        | Project icon with custom color, letter, or cover image |
+    | **Name**        | Project title                                          |
+    | **Creator**     | Author avatar and username                             |
+    | **Description** | Short project description                              |
+    | **Star Count**  | Number of community stars (shown when above zero)      |
+    | **Model Count** | Number of models in the project                        |
+    | **Size**        | Total storage used by the project's model files        |
+    | **Updated**     | Date the project last changed                          |
+    | **Model Tags**  | Names of the first few models in the project           |
+    | **Tags**        | Project tags                                           |
 
 === "Dataset Cards"
 
-    | Element          | Description                                                       |
-    | ---------------- | ----------------------------------------------------------------- |
-    | **Thumbnails**   | Up to four preview images with their annotations drawn on top     |
-    | **Name**         | Dataset title                                                     |
-    | **Creator**      | Author avatar and username                                        |
-    | **Task Badge**   | YOLO task type (detect, segment, etc.)                            |
-    | **Image Count**  | Number of images, overlaid on the thumbnail strip                 |
-    | **Star Count**   | Number of community stars (shown when above zero)                 |
-    | **Class Count**  | Number of classes defined in the dataset                          |
-    | **Size**         | Total storage used by the dataset                                 |
-    | **Updated**      | Date the dataset last changed                                     |
-    | **Class Names**  | First few class names as badges                                   |
-    | **Tags**         | Dataset tags                                                      |
-    | **Split Bar**    | Relative sizes of the train, val, and test splits                 |
+    | Element         | Description                                                   |
+    | --------------- | ------------------------------------------------------------- |
+    | **Thumbnails**  | Up to four preview images with their annotations drawn on top |
+    | **Name**        | Dataset title                                                 |
+    | **Creator**     | Author avatar and username                                    |
+    | **Task Badge**  | YOLO task type (detect, segment, etc.)                        |
+    | **Image Count** | Number of images, overlaid on the thumbnail strip             |
+    | **Star Count**  | Number of community stars (shown when above zero)             |
+    | **Class Count** | Number of classes defined in the dataset                      |
+    | **Size**        | Total storage used by the dataset                             |
+    | **Updated**     | Date the dataset last changed                                 |
+    | **Class Names** | First few class names as badges                               |
+    | **Tags**        | Dataset tags                                                  |
+    | **Split Bar**   | Relative sizes of the train, val, and test splits             |
 
 ## Use Public Content
 
@@ -172,6 +173,7 @@ Use a public dataset for your training:
 4. Click `Clone Dataset` to confirm
 
 ![Ultralytics Platform Explore Clone Dataset](https://cdn.ul.run/i/f8691631e0bf7b37d6402ee377c040f7.avif)<!-- screenshot -->
+
 !!! note "Cloned Dataset Properties"
 
     - The clone dialog lets you review the destination, name, visibility, and license
@@ -180,7 +182,7 @@ Use a public dataset for your training:
     - The destination slug is auto-renamed if the name is already taken in your workspace
     - You can modify classes, annotations, and splits
     - Changes don't affect the original dataset
-    - Image bytes reuse content-addressable storage (CAS), but the clone still counts toward the destination workspace's storage quota
+    - Image files are reused rather than copied, but the clone still counts toward the destination workspace's storage quota
 
 See [Datasets](data/datasets.md) for managing and annotating your cloned dataset.
 
@@ -213,6 +215,7 @@ Clone a public model to one of your projects:
 5. Review the source, destination, and storage summary, then click `Clone Model` to confirm
 
 ![Ultralytics Platform Explore Clone Model Dialog](https://cdn.ul.run/i/258ade9b3b4aea11dab181c17995f802.avif)<!-- screenshot -->
+
 !!! note "Clone vs Download"
 
     **Clone** copies the model to a project on the Platform for further training or deployment. **Download** saves the model file to your local machine.
@@ -226,6 +229,7 @@ Copy a public project to your workspace:
 3. Review the destination, name, visibility, and license, then click `Clone Project`
 
 ![Ultralytics Platform Explore Clone Project](https://cdn.ul.run/i/1096f79e000e9297860173aa46258035.avif)<!-- screenshot -->
+
 The cloned project includes completed models that have model files. Deployments and exports are not copied. Its default visibility follows the same workspace rules as dataset cloning.
 
 See [Projects](train/projects.md) for organizing models in your project.

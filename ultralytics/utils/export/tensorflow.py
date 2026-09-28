@@ -10,7 +10,7 @@ import numpy as np
 import torch
 
 from ultralytics.nn.modules import Detect, Pose, Pose26
-from ultralytics.utils import LINUX, LOGGER, MACOS
+from ultralytics.utils import AUTOINSTALL, LINUX, LOGGER, MACOS
 from ultralytics.utils.checks import (
     IS_PYTHON_MINIMUM_3_13,
     check_apt_requirements,
@@ -23,7 +23,14 @@ from ultralytics.utils.tal import make_anchors
 
 
 def tf_wrapper(model: torch.nn.Module) -> torch.nn.Module:
-    """A wrapper for TensorFlow export compatibility (TF-specific handling is now in head modules)."""
+    """Patch Detect and Pose head decoding with TensorFlow-export-compatible normalized implementations.
+
+    Args:
+        model (torch.nn.Module): Model whose Detect (and Pose) heads are patched in place.
+
+    Returns:
+        (torch.nn.Module): The same model with patched head methods.
+    """
     for m in model.modules():
         if not isinstance(m, Detect):
             continue
@@ -45,7 +52,7 @@ def _tf_decode_boxes(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
     grid_h, grid_w = shape[2:4]
     grid_size = torch.tensor([grid_w, grid_h, grid_w, grid_h], device=boxes.device).reshape(1, 4, 1)
     norm = self.strides / (self.stride[0] * grid_size)
-    dbox = self.decode_bboxes(self.dfl(boxes) * norm, self.anchors.unsqueeze(0) * norm[:, :2])
+    dbox = self.decode_bboxes(self.dfl(boxes) * norm, self.anchors.unsqueeze(0) * norm[:, :2], x.get("angle"))
     return dbox
 
 
@@ -90,7 +97,7 @@ def onnx2saved_model(
 
     Notes:
         - Auto-installs tensorflow, onnx2tf, and all required dependencies if not present.
-        - Downloads calibration data if INT8 quantization is enabled.
+        - Downloads the onnx2tf calibration sample data file if not already present.
         - Removes temporary files and renames quantized models after conversion.
     """
     try:
@@ -143,6 +150,7 @@ def onnx2saved_model(
         if images is not None:
             output_dir.mkdir(parents=True, exist_ok=True)
             np.save(str(tmp_file), images)  # BHWC
+            del images
             np_data = [["images", tmp_file, [[[[0, 0, 0]]]], [[[[255, 255, 255]]]]]]
 
     # Patch onnx.helper for onnx_graphsurgeon compatibility with ONNX>=1.17
@@ -207,7 +215,7 @@ def keras2pb(keras_model, output_file: Path | str, prefix: str = "") -> str:
 
     Args:
         keras_model (keras.Model): Keras model to convert to frozen graph format.
-        output_file (Path | str): Output file path (suffix will be changed to .pb).
+        output_file (Path | str): Output ``.pb`` file path.
         prefix (str, optional): Logging prefix. Defaults to "".
 
     Returns:
@@ -242,6 +250,9 @@ def tflite2edgetpu(tflite_file: str | Path, output_dir: str | Path, prefix: str 
     Returns:
         (str): Path to the exported Edge TPU model file.
 
+    Raises:
+        FileNotFoundError: If the Edge TPU compiler is missing and auto-install is disabled.
+
     Notes:
         Auto-installs the Edge TPU compiler if not found. The function compiles the TFLite model
         for optimal performance on Google's Edge TPU hardware accelerator.
@@ -259,6 +270,10 @@ def tflite2edgetpu(tflite_file: str | Path, output_dir: str | Path, prefix: str 
         ).returncode
         != 0
     ):
+        if not AUTOINSTALL:
+            raise FileNotFoundError(
+                f"Edge TPU compiler not found and YOLO_AUTOINSTALL=False. Install it from {help_url}"
+            )
         LOGGER.info(f"\n{prefix} export requires Edge TPU compiler. Attempting install from {help_url}")
         sudo = "sudo " if is_sudo_available() else ""
         for c in (

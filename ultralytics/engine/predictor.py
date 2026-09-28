@@ -3,38 +3,40 @@
 Run prediction on images, videos, directories, globs, YouTube, webcam, streams, etc.
 
 Usage - sources:
-    $ yolo mode=predict model=yolo26n.pt source=0                               # webcam
-                                                img.jpg                         # image
-                                                vid.mp4                         # video
-                                                screen                          # screenshot
-                                                path/                           # directory
-                                                list.txt                        # list of images
-                                                list.streams                    # list of streams
-                                                'path/*.jpg'                    # glob
-                                                'https://youtu.be/LNwODJXcvt4'  # YouTube
-                                                'rtsp://example.com/media.mp4'  # RTSP, RTMP, HTTP, TCP stream
+    $ yolo predict model=yolo26n.pt source=0                               # webcam
+                                           img.jpg                         # image
+                                           vid.mp4                         # video
+                                           screen                          # screenshot
+                                           path/                           # directory
+                                           list.txt                        # list of images
+                                           list.streams                    # list of streams
+                                           'path/*.jpg'                    # glob
+                                           'https://youtu.be/LNwODJXcvt4'  # YouTube
+                                           'rtsp://example.com/media.mp4'  # RTSP, RTMP, HTTP, TCP stream
 
 Usage - formats:
-    $ yolo mode=predict model=yolo26n.pt                 # PyTorch
-                              yolo26n.torchscript        # TorchScript
-                              yolo26n.onnx               # ONNX Runtime or OpenCV DNN with dnn=True
-                              yolo26n_openvino_model     # OpenVINO
-                              yolo26n.engine             # TensorRT
-                              yolo26n.mlpackage          # CoreML (macOS-only)
-                              yolo26n_saved_model        # TensorFlow SavedModel
-                              yolo26n.pb                 # TensorFlow GraphDef
-                              yolo26n_edgetpu.tflite     # TensorFlow Edge TPU
-                              yolo26n_paddle_model       # PaddlePaddle
-                              yolo26n.mnn                # MNN
-                              yolo26n_ncnn_model         # NCNN
-                              yolo26n_imx_model          # Sony IMX
-                              yolo26n_rknn_model         # Rockchip RKNN
-                              yolo26n_executorch_model   # PyTorch Executorch
-                              yolo26n_axelera_model      # Axelera AI
-                              yolo26n_deepx_model        # DEEPX
-                              yolo26n_qnn.onnx           # Qualcomm QNN
-                              yolo26n.tflite             # LiteRT
-                              yolo26n_ascend_model       # Huawei Ascend
+    $ yolo predict model=yolo26n.pt                 # PyTorch
+                         yolo26n.torchscript        # TorchScript
+                         yolo26n.onnx               # ONNX Runtime or OpenCV DNN with dnn=True
+                         yolo26n_openvino_model     # OpenVINO
+                         yolo26n.engine             # TensorRT
+                         yolo26n.mlpackage          # CoreML (macOS-only)
+                         yolo26n.aimodel            # Apple Core AI
+                         yolo26n_saved_model        # TensorFlow SavedModel
+                         yolo26n.pb                 # TensorFlow GraphDef
+                         yolo26n_edgetpu.tflite     # TensorFlow Edge TPU
+                         yolo26n.tflite             # LiteRT
+                         yolo26n_paddle_model       # PaddlePaddle
+                         yolo26n.mnn                # MNN
+                         yolo26n_ncnn_model         # NCNN
+                         yolo26n_imx_model          # Sony IMX
+                         yolo26n_rknn_model         # Rockchip RKNN
+                         yolo26n_executorch_model   # PyTorch ExecuTorch
+                         yolo26n_axelera_model      # Axelera AI
+                         yolo26n_deepx_model        # DEEPX
+                         yolo26n_qnn.onnx           # Qualcomm QNN
+                         yolo26n_hailo_model        # Hailo
+                         yolo26n_ascend_model       # Huawei Ascend
 """
 
 from __future__ import annotations
@@ -42,6 +44,8 @@ from __future__ import annotations
 import platform
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from copy import copy, deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
@@ -52,6 +56,7 @@ import torch
 from ultralytics.cfg import get_cfg, get_save_dir
 from ultralytics.data import load_inference_source
 from ultralytics.data.augment import LetterBox
+from ultralytics.data.loaders import LoadImagesAndVideos
 from ultralytics.nn.autobackend import AutoBackend
 from ultralytics.utils import DEFAULT_CFG, LOGGER, MACOS, WINDOWS, callbacks, colorstr, ops
 from ultralytics.utils.checks import check_imgsz, check_imshow
@@ -71,6 +76,19 @@ Example:
 """
 
 
+def _prefetch(iterator):
+    """Yield items while loading the next one on a worker thread."""
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(next, iterator)
+        while True:
+            try:
+                item = future.result()
+            except StopIteration:
+                return
+            future = executor.submit(next, iterator)
+            yield item
+
+
 class BasePredictor:
     """A base class for creating predictors.
 
@@ -80,9 +98,10 @@ class BasePredictor:
     Attributes:
         args (SimpleNamespace): Configuration for the predictor.
         save_dir (Path): Directory to save results.
-        done_warmup (bool): Whether the predictor has finished setup.
+        done_warmup (bool): Whether the model has been warmed up.
         model (torch.nn.Module): Model used for prediction.
         data (str | Path | None): Copy of args.data, the dataset YAML AutoBackend falls back to for class names.
+        imgsz (list[int]): Checked inference image size (height, width).
         device (torch.device): Device used for prediction.
         dataset (Dataset): Dataset used for prediction.
         vid_writer (dict[Path, cv2.VideoWriter]): Dictionary of {save_path: video_writer} for saving video output.
@@ -163,27 +182,29 @@ class BasePredictor:
         """Prepare input image before inference.
 
         Args:
-            im (torch.Tensor | list[np.ndarray]): Images of shape (N, 3, H, W) for tensor, [(H, W, 3) x N] for list.
+            im (torch.Tensor | list[np.ndarray]): Images of shape (N, 3, H, W) for tensor, already RGB and normalized to
+                0.0-1.0, or [(H, W, 3) x N] for list of BGR uint8 arrays. See
+                ultralytics.data.loaders.LoadTensor._single_check for tensor input requirements.
 
         Returns:
             (torch.Tensor): Preprocessed image tensor of shape (N, 3, H, W).
         """
-        not_tensor = not isinstance(im, torch.Tensor)
-        if not_tensor:
-            im = np.stack(self.pre_transform(im))
-            if im.shape[-1] == 3:
-                im = im[..., ::-1]  # BGR to RGB
-            im = im.transpose((0, 3, 1, 2))  # BHWC to BCHW, (n, 3, h, w)
-            im = np.ascontiguousarray(im)  # contiguous
-            im = torch.from_numpy(im)
+        if not isinstance(im, torch.Tensor):
+            im = self.pre_transform(im)
+            # For a single image, add a batch dimension without the copy required by np.stack().
+            im = torch.from_numpy(im[0]).unsqueeze(0) if len(im) == 1 else torch.from_numpy(np.stack(im))
+            im = im.to(self.device)  # transfer as uint8, then reorder on device
+            im = im.permute(0, 3, 1, 2)  # BHWC to BCHW, (n, 3, h, w)
+            if im.shape[1] == 3:
+                im = im.flip(1)  # BGR to RGB
             if self.ch == 1:
                 # Transform the input img into a (n, 1, h, w) torch tensor
                 im = im.unsqueeze(1)
-
-        im = im.to(self.device)
-        im = im.half() if self.model.fp16 else im.float()  # uint8 to fp16/32
-        if not_tensor:
-            im /= 255  # 0 - 255 to 0.0 - 1.0
+            im = im.contiguous()
+            im = (im.half() if self.model.fp16 else im.float()).div_(255)  # uint8 to fp16/32, 0 - 255 to 0.0 - 1.0
+        else:
+            im = im.to(self.device)
+            im = im.half() if self.model.fp16 else im.float()  # already 0.0 - 1.0, no division
         return im
 
     def inference(self, im: torch.Tensor, *args, **kwargs):
@@ -246,7 +267,7 @@ class BasePredictor:
             return list(self.stream_inference(source, model, *args, **kwargs))  # merge list of Results into one
 
     def predict_cli(self, source=None, model=None):
-        """Method used for Command Line Interface (CLI) prediction.
+        """Run prediction for the Command Line Interface (CLI).
 
         This function is designed to run predictions using the CLI. It sets up the source and model, then processes the
         inputs in a streaming manner. This method ensures that no outputs accumulate in memory by consuming the
@@ -273,6 +294,8 @@ class BasePredictor:
                 inference.
             stride (int, optional): Model stride for image size checking.
         """
+        if hasattr(self.model, "imgsz") and not getattr(self.model, "dynamic", False):
+            self.args.imgsz = self.model.imgsz  # every run reuses imgsz from export metadata, not just the first
         self.imgsz = check_imgsz(self.args.imgsz, stride=stride or self.model.stride, min_dim=2)  # check image size
         self.dataset = load_inference_source(
             source=source,
@@ -306,7 +329,8 @@ class BasePredictor:
             **kwargs (Any): Additional keyword arguments for the inference method.
 
         Yields:
-            (ultralytics.engine.results.Results): Results objects.
+            (ultralytics.engine.results.Results | torch.Tensor): Results objects, or embedding tensors when `embed` is
+                set.
         """
         if self.args.verbose:
             LOGGER.info("")
@@ -321,6 +345,9 @@ class BasePredictor:
             self.args.augment, self.args.embed, self.args.visualize = False, None, False
 
         with self._lock:  # for thread-safe inference
+            if self.model.format == "pt" and self.model.end2end:
+                # Class filtering needs candidates before max_det truncation.
+                self.model.model.set_head_attr(max_det=max(self.args.max_det, 300), agnostic_nms=self.args.agnostic_nms)
             # Setup source every time predict is called
             self.setup_source(source if source is not None else self.args.source)
 
@@ -335,60 +362,75 @@ class BasePredictor:
                 ops.Profile(device=self.device),
                 ops.Profile(device=self.device),
             )
-            self.run_callbacks("on_predict_start")
-            for batch in self.dataset:
-                self.batch = batch
-                self.run_callbacks("on_predict_batch_start")
-                paths, im0s, s = self.batch
+            dataset = self.dataset
+            batches = ((batch, dataset) for batch in dataset)
+            if (  # overlap loading with GPU work; each batch carries a snapshot of the loader's mode, frame and fps
+                self.device.type == "cuda"
+                and isinstance(dataset, LoadImagesAndVideos)
+                and (dataset.nf > dataset.ni or len(dataset) > 1)
+            ):
+                batches = _prefetch((batch, copy(dataset)) for batch in dataset)
+            try:
+                self.run_callbacks("on_predict_start")
+                for self.batch, self.dataset in batches:
+                    self.run_callbacks("on_predict_batch_start")
+                    paths, im0s, s = self.batch
 
-                # Preprocess
-                with profilers[0]:
-                    im = self.preprocess(im0s)
+                    # Preprocess
+                    with profilers[0]:
+                        im = self.preprocess(im0s)
 
-                if not self.done_warmup:
-                    self.model.warmup(im=im)
-                    self.done_warmup = True
+                    if not self.done_warmup:
+                        self.model.warmup(im=im)
+                        self.done_warmup = True
 
-                # Inference
-                with profilers[1]:
-                    preds = self.inference(im, *args, **kwargs)
-                    if self.args.embed:
-                        yield from [preds] if isinstance(preds, torch.Tensor) else preds  # yield embedding tensors
-                        continue
+                    # Inference
+                    with profilers[1]:
+                        preds = self.inference(im, *args, **kwargs)
+                        if self.args.embed:
+                            yield from [preds] if isinstance(preds, torch.Tensor) else preds  # yield embed tensors
+                            continue
 
-                # Postprocess
-                with profilers[2]:
-                    self.results = self.postprocess(preds, im, im0s)
-                self.run_callbacks("on_predict_postprocess_end")
+                    # Postprocess
+                    with profilers[2]:
+                        self.results = self.postprocess(preds, im, im0s)
+                    self.run_callbacks("on_predict_postprocess_end")
 
-                # Visualize, save, write results
-                n = len(im0s)
-                try:
-                    for i in range(n):
-                        self.seen += 1
-                        px += im.shape[2] * im.shape[3]
-                        self.results[i].speed = {
-                            "preprocess": profilers[0].dt * 1e3 / n,
-                            "inference": profilers[1].dt * 1e3 / n,
-                            "postprocess": profilers[2].dt * 1e3 / n,
-                        }
-                        if (
-                            self.args.verbose
-                            or self.args.save
-                            or self.args.save_txt
-                            or self.args.save_crop
-                            or self.args.show
-                        ):
-                            s[i] += self.write_results(i, Path(paths[i]), im, s)
-                except StopIteration:
-                    break
+                    # Visualize, save, write results
+                    n = len(im0s)
+                    try:
+                        for i in range(n):
+                            self.seen += 1
+                            px += im.shape[2] * im.shape[3]
+                            self.results[i].speed = {
+                                "preprocess": profilers[0].dt * 1e3 / n,
+                                "inference": profilers[1].dt * 1e3 / n,
+                                "postprocess": profilers[2].dt * 1e3 / n,
+                            }
+                            if (
+                                self.args.verbose
+                                or self.args.save
+                                or self.args.save_txt
+                                or self.args.save_crop
+                                or self.args.show
+                            ):
+                                s[i] += self.write_results(i, Path(paths[i]), im, s)
+                    except StopIteration:
+                        break
 
-                # Print batch results
-                if self.args.verbose:
-                    LOGGER.info("\n".join(s))
+                    # Print batch results
+                    if self.args.verbose:
+                        LOGGER.info("\n".join(s))
 
-                self.run_callbacks("on_predict_batch_end")
-                yield from self.results
+                    self.run_callbacks("on_predict_batch_end")
+                    yield from self.results
+            finally:  # also runs when a stream=True consumer abandons the generator or an error aborts the loop
+                for v in self.vid_writer.values():
+                    if isinstance(v, cv2.VideoWriter):
+                        v.release()
+                batches.close()  # stop the prefetch worker before releasing the capture it reads
+                if hasattr(dataset, "close"):  # stop LoadStreams threads and release source captures
+                    dataset.close()
 
             # Final results, under the lock: seen is reset by every run, so reading it outside could divide this run's
             # profilers by a concurrent run's count. px and profilers are locals and are already private to this run.
@@ -402,11 +444,6 @@ class BasePredictor:
                         f"{(min(self.args.batch, seen), getattr(self.model, 'channels', 3), *im.shape[2:])}" % t
                     )
 
-        # Release assets
-        for v in self.vid_writer.values():
-            if isinstance(v, cv2.VideoWriter):
-                v.release()
-
         if self.args.show:
             cv2.destroyAllWindows()  # close any open windows
 
@@ -416,6 +453,7 @@ class BasePredictor:
             LOGGER.info(f"Results saved to {colorstr('bold', self.save_dir)}{s}")
         self.run_callbacks("on_predict_end")
 
+    @smart_inference_mode(False)
     def setup_model(self, model, verbose: bool = True):
         """Initialize YOLO model with given parameters and set it to evaluation mode.
 
@@ -423,37 +461,21 @@ class BasePredictor:
             model (str | Path | torch.nn.Module): Model to load or use.
             verbose (bool): Whether to print verbose output.
         """
-        if hasattr(model, "end2end"):
-            if self.args.end2end is not None:
-                model.end2end = self.args.end2end
-            if model.end2end:
-                # Keep head top-k >= 300 so `classes` filtering in NMS sees all candidates before `max_det` truncation
-                model.set_head_attr(max_det=max(self.args.max_det, 300), agnostic_nms=self.args.agnostic_nms)
+        model = deepcopy(model)
         self.model = AutoBackend(
             model=model or self.args.model,
             device=select_device(self.args.device, verbose=verbose),
             dnn=self.args.dnn,
             data=self.args.data,
             fp16=self.args.quantize == 16,
+            channels_last=self.args.channels_last,
             fuse=True,
             verbose=verbose,
+            end2end=self.args.nms is False,
         )
 
         self.device = self.model.device  # update device
-        self.args.quantize = 16 if self.model.fp16 else None  # record actual inference precision
-        if hasattr(self.model, "imgsz") and not getattr(self.model, "dynamic", False):
-            self.args.imgsz = self.model.imgsz  # reuse imgsz from export metadata
         self.model.eval()
-        # channels_last (NHWC) is CUDA-only and native-PyTorch-only: lossless and Tensor-Core friendly there, wrong
-        # on MPS, no CPU gain, and only a native nn.Module has weights to convert.
-        channels_last = self.args.channels_last and self.device.type == "cuda" and self.model.format == "pt"
-        if self.args.channels_last and not channels_last:
-            LOGGER.warning(
-                f"'channels_last=True' applies only to native PyTorch models on CUDA, ignoring for "
-                f"format='{self.model.format}' on '{self.device.type}'."
-            )
-        if channels_last:
-            self.model.to(memory_format=torch.channels_last)
         self.model = attempt_compile(self.model, device=self.device, mode=self.args.compile)
 
     def write_results(self, i: int, p: Path, im: torch.Tensor, s: list[str]) -> str:
@@ -505,12 +527,12 @@ class BasePredictor:
 
         return string
 
-    def save_predicted_images(self, save_path: Path, frame: int = 0):
+    def save_predicted_images(self, save_path: Path, frame: int | None = 0):
         """Save video predictions as mp4/avi or images as jpg at specified path.
 
         Args:
             save_path (Path): Path to save the results.
-            frame (int): Frame number for video mode.
+            frame (int | None): Frame number for video mode.
         """
         im = self.plotted_img
 

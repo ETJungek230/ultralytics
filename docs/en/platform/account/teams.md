@@ -68,6 +68,7 @@ hyphens, and it must not already be taken.
 Switch between your personal account and team workspaces using the workspace switcher in the sidebar. All teams you belong to appear in the list.
 
 ![Ultralytics Platform Teams Workspace Switcher Dropdown](https://cdn.ul.run/i/b5d3298767cc96743a74133b7c92fe6b.avif)<!-- screenshot -->
+
 When you switch to a team workspace, all resources you see and create belong to that team. Your personal workspace resources remain separate.
 
 ## Roles and Permissions
@@ -133,7 +134,8 @@ Admins and Owners can invite new members to the team:
 2. Click **Invite**
 3. Enter the invitee's email address
 4. Select a role (Admin, Editor, or Viewer)
-5. Click **Continue**, review the seat cost, then click **Confirm & invite**
+5. Click **Continue**, review the seat cost, then click **Confirm & invite** (workspaces without seat billing, such as
+   Enterprise, show **Send Invitation** instead)
 
 ![Ultralytics Platform Teams Invite Member Dialog](https://cdn.ul.run/i/4f3fbc7dc21172bf12cd404a5ca0b863.avif)<!-- screenshot -->
 

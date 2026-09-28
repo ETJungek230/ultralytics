@@ -1,7 +1,7 @@
 ---
 comments: true
 description: Discover Ultralytics integrations for streamlined ML workflows, dataset management, optimized model training, and robust deployment solutions.
-keywords: Ultralytics, machine learning, ML workflows, dataset management, model training, model deployment, Roboflow, ClearML, Comet ML, DVC, MLFlow, Ultralytics Platform, Neptune, Ray Tune, TensorBoard, Weights & Biases, Amazon SageMaker, Paperspace Gradient, Google Colab, Neural Magic, Gradio, TorchScript, ONNX, OpenVINO, TensorRT, CoreML, TF SavedModel, TF GraphDef, TFLite Edge TPU, LiteRT, PaddlePaddle, NCNN, Hailo, Hailo HEF, Ambarella, CVflow, Qualcomm QNN, RKNN, edge AI
+keywords: Ultralytics, machine learning, ML workflows, dataset management, model training, model deployment, Roboflow, ClearML, Comet ML, DVC, MLFlow, Ultralytics Platform, Ray Tune, TensorBoard, Weights & Biases, Amazon SageMaker, Paperspace Gradient, Google Colab, Neural Magic, Gradio, TorchScript, ONNX, OpenVINO, TensorRT, CoreML, TF SavedModel, TF GraphDef, TFLite Edge TPU, LiteRT, Luxonis, PaddlePaddle, NCNN, Hailo, Hailo HEF, Ambarella, CVflow, Qualcomm QNN, RKNN, edge AI
 ---
 
 # Ultralytics Integrations
@@ -49,15 +49,13 @@ Welcome to the Ultralytics Integrations page! This page provides an overview of 
 
 - [MLFlow](mlflow.md): Streamline the entire ML lifecycle of Ultralytics models, from experimentation and reproducibility to deployment.
 
-- [Neptune](neptune.md): Maintain a comprehensive log of your ML experiments with Ultralytics in this metadata store designed for MLOps.
-
 - [Paperspace Gradient](paperspace.md): Paperspace Gradient simplifies working on YOLO26 projects by providing easy-to-use cloud tools for training, testing, and deploying your models quickly.
 
 - [Ray Tune](ray-tune.md): Optimize the hyperparameters of your Ultralytics models at any scale.
 
 - [TensorBoard](tensorboard.md): Visualize your Ultralytics ML workflows, monitor model metrics, and foster team collaboration.
 
-- [Ultralytics Platform](https://platform.ultralytics.com): Access and contribute to a community of pretrained Ultralytics models.
+- [Ultralytics Platform](https://platform.ultralytics.com): Train, manage, and deploy Ultralytics models in the browser, and download official pretrained models and datasets.
 
 - [VS Code](vscode.md): An extension for VS Code that provides code snippets to accelerate Ultralytics development workflows and offers examples to help anyone learn or get started.
 
@@ -71,7 +69,7 @@ Welcome to the Ultralytics Integrations page! This page provides an overview of 
 
 - [Axelera](axelera.md): Explore Metis accelerators and the Voyager SDK for running Ultralytics models with efficient edge inference.
 
-- [Core AI](coreai.md): Learn about Apple's new `.aimodel` format, how Core AI compares with Core ML, its current limitations, and the planned Ultralytics integration for the iOS 27 and macOS 27 generation.
+- [Core AI](coreai.md): Learn about Apple's new `.aimodel` format, how Core AI compares with Core ML, its current limitations, and how to export YOLO26 models with `format="coreai"` for the iOS 27 and macOS 27 generation.
 
 - [CoreML](coreml.md): CoreML, developed by [Apple](https://www.apple.com/), is a framework designed for efficiently integrating machine learning models into applications across iOS, macOS, watchOS, and tvOS, using Apple's hardware for effective and secure [model deployment](https://www.ultralytics.com/glossary/model-deployment).
 
@@ -84,6 +82,8 @@ Welcome to the Ultralytics Integrations page! This page provides an overview of 
 - [Hailo](hailo.md): Export Ultralytics YOLO detection, segmentation, semantic segmentation, depth estimation, classification, pose, and OBB models directly to Hailo HEF; see the integration guide for validated models and targets.
 
 - [Huawei Ascend](ascend.md): Compile Ultralytics YOLO models to the Huawei Ascend `.om` offline format with the CANN ATC compiler for FP16 inference on Atlas and OrangePi AIPro devices.
+
+- [Luxonis](luxonis.md): Convert Ultralytics YOLO models with Luxonis Hub or local Luxonis tooling and run them on-device on Luxonis OAK `RVC2` and `RVC4` cameras.
 
 - [MNN](mnn.md): Developed by [Alibaba](https://www.alibabagroup.com/), MNN is a highly efficient and lightweight deep learning framework. It supports inference and training of deep learning models and has industry-leading performance for inference and training on-device.
 
@@ -105,7 +105,7 @@ Welcome to the Ultralytics Integrations page! This page provides an overview of 
 
 - [SONY IMX500](sony-imx500.md): Optimize and deploy [Ultralytics YOLO26](../models/yolo26.md) models on Raspberry Pi AI Cameras with the IMX500 sensor for fast, low-power performance.
 
-- [TensorRT](tensorrt.md): Developed by [NVIDIA](https://www.nvidia.com/ja-jp/), this high-performance [deep learning](https://www.ultralytics.com/glossary/deep-learning-dl) inference framework and model format optimizes AI models for accelerated speed and efficiency on NVIDIA GPUs, ensuring streamlined deployment.
+- [TensorRT](tensorrt.md): Developed by [NVIDIA](https://www.nvidia.com/), this high-performance [deep learning](https://www.ultralytics.com/glossary/deep-learning-dl) inference framework and model format optimizes AI models for accelerated speed and efficiency on NVIDIA GPUs, ensuring streamlined deployment.
 
 - [TF GraphDef](tf-graphdef.md): Developed by [Google](https://www.google.com/), GraphDef is TensorFlow's format for representing computation graphs, enabling optimized execution of machine learning models across diverse hardware.
 

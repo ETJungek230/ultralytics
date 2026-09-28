@@ -66,7 +66,6 @@ ASSETS = ROOT / "assets"  # default images
 ASSETS_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0"  # assets GitHub URL
 # Configurable Platform URL for debugging (e.g. ULTRALYTICS_PLATFORM_URL=http://localhost:3000)
 PLATFORM_URL = os.getenv("ULTRALYTICS_PLATFORM_URL", "https://platform.ultralytics.com").rstrip("/")
-PLATFORM_API_URL = os.getenv("PLATFORM_API_URL", f"{PLATFORM_URL}/api/webhooks")
 DEFAULT_CFG_PATH = ROOT / "cfg/default.yaml"
 NUM_THREADS = min(8, max(1, os.cpu_count() - 1))  # number of YOLO multiprocessing threads
 AUTOINSTALL = env_bool("YOLO_AUTOINSTALL", True)  # global auto-install mode
@@ -133,7 +132,7 @@ HELP_MSG = """
 
             yolo TASK MODE ARGS
 
-            Where   TASK (optional) is one of [detect, segment, semantic, classify, pose, obb, depth]
+            Where   TASK (optional) is one of [detect, segment, semantic, depth, classify, pose, obb]
                     MODE (required) is one of [train, val, predict, export, track, benchmark]
                     ARGS (optional) are any number of custom "arg=value" pairs like "imgsz=320" that override defaults.
                         See all ARGS at https://docs.ultralytics.com/usage/cfg or with "yolo cfg"
@@ -190,21 +189,21 @@ class DataExportMixin:
     """Mixin class for exporting validation metrics or prediction results in various formats.
 
     This class provides utilities to export performance metrics (e.g., mAP, precision, recall) or prediction results
-    from classification, object detection, segmentation, or pose estimation tasks into various formats: Polars
-    DataFrame, CSV, and JSON.
+    from detection, segmentation, depth, classification, or pose estimation tasks into various formats: Polars
+    DataFrame, CSV, and JSON. Subclasses must implement a `summary(normalize, decimals)` method.
 
     Methods:
         to_df: Convert summary to a Polars DataFrame.
         to_csv: Export results as a CSV string.
         to_json: Export results as a JSON string.
-        tojson: Deprecated alias for `to_json()`.
 
     Examples:
+        >>> from ultralytics import YOLO
         >>> model = YOLO("yolo26n.pt")
         >>> results = model("image.jpg")
-        >>> df = results.to_df()
+        >>> df = results[0].to_df()
         >>> print(df)
-        >>> csv_data = results.to_csv()
+        >>> csv_data = results[0].to_csv()
     """
 
     def to_df(self, normalize=False, decimals=5):
@@ -377,23 +376,20 @@ def plt_settings(rcparams=None, backend="Agg"):
     """Decorator to temporarily set rc parameters and the backend for a plotting function.
 
     Args:
-        rcparams (dict, optional): Dictionary of rc parameters to set.
+        rcparams (dict, optional): Dictionary of rc parameters to set. Defaults to {"font.size": 11}.
         backend (str, optional): Name of the backend to use.
 
     Returns:
-        (Callable): Decorated function with temporarily set rc parameters and backend.
+        (Callable): Decorator that runs the wrapped function with temporarily set rc parameters and backend.
 
     Examples:
+        >>> import matplotlib.pyplot as plt
+        >>> from ultralytics.utils import plt_settings
         >>> @plt_settings({"font.size": 12})
         ... def plot_function():
         ...     plt.figure()
         ...     plt.plot([1, 2, 3])
-        ...     plt.show()
-
-        >>> with plt_settings({"font.size": 12}):
-        ...     plt.figure()
-        ...     plt.plot([1, 2, 3])
-        ...     plt.show()
+        ...     plt.savefig("plot.png")
     """
     if rcparams is None:
         rcparams = {"font.size": 11}
@@ -424,6 +420,12 @@ def plt_settings(rcparams=None, backend="Agg"):
             original_backend = plt.get_backend()
             switch = backend.lower() != original_backend.lower()
             if switch:
+                # Resolve configured backends first, as get_backend() may return an unavailable backend name
+                if plt._backend_mod is None:
+                    try:
+                        plt.switch_backend(original_backend)
+                    except ImportError:
+                        original_backend = None
                 plt.close("all")  # auto-close()ing of figures upon backend switching is deprecated since 3.8
                 plt.switch_backend(backend)
 
@@ -434,7 +436,8 @@ def plt_settings(rcparams=None, backend="Agg"):
             finally:
                 if switch:
                     plt.close("all")
-                    plt.switch_backend(original_backend)
+                    if original_backend:
+                        plt.switch_backend(original_backend)
             return result
 
         wrapper._fonts_registered = False
@@ -443,7 +446,7 @@ def plt_settings(rcparams=None, backend="Agg"):
     return decorator
 
 
-def set_logging(name="LOGGING_NAME", verbose=True):
+def set_logging(name=LOGGING_NAME, verbose=True):
     """Set up logging with UTF-8 encoding and configurable verbosity.
 
     This function configures logging for the Ultralytics library, setting the appropriate logging level and formatter
@@ -538,7 +541,7 @@ class ThreadingLocked:
         >>> from ultralytics.utils import ThreadingLocked
         >>> @ThreadingLocked()
         ... def my_function():
-        ...    # Your code here
+        ...     pass  # your code here
     """
 
     def __init__(self):
@@ -579,6 +582,7 @@ class YAML:
         SafeDumper: Best available YAML dumper (CSafeDumper if available).
 
     Examples:
+        >>> from ultralytics.utils import YAML
         >>> data = YAML.load("config.yaml")
         >>> data["new_value"] = 123
         >>> YAML.save("updated_config.yaml", data)
@@ -613,7 +617,8 @@ class YAML:
 
         Args:
             file (str | Path): Path to save YAML file.
-            data (dict | None): Dict or compatible object to save.
+            data (dict | None): Dict to save. Top-level values of non-YAML-serializable types are converted to strings
+                in place.
             header (str): Optional string to add at file beginning.
         """
         instance = cls._get_instance()
@@ -645,7 +650,11 @@ class YAML:
             append_filename (bool): Whether to add filename to returned dict.
 
         Returns:
-            (dict): Loaded YAML content.
+            (dict): Loaded YAML content, or an empty dict for an empty file.
+
+        Raises:
+            AssertionError: If the file does not have a .yaml or .yml suffix.
+            ValueError: If the file contains a YAML syntax error or is not a YAML mapping.
         """
         instance = cls._get_instance()
         assert str(file).endswith((".yaml", ".yml")), f"Not a YAML file: {file}"
@@ -820,7 +829,7 @@ def is_jetson(jetpack=None) -> bool:
     """Determine if the Python environment is running on an NVIDIA Jetson device.
 
     Args:
-        jetpack (int | None): If specified, check for specific JetPack version (4, 5, 6).
+        jetpack (int | None): If specified, check for specific JetPack version (4, 5, 6, 7).
 
     Returns:
         (bool): True if running on an NVIDIA Jetson device, False otherwise.
@@ -868,13 +877,13 @@ def is_online() -> bool:
 
 
 def is_pip_package(filepath: str = __name__) -> bool:
-    """Determine if the file at the given filepath is part of a pip package.
+    """Determine if the given module is importable from an installed package.
 
     Args:
-        filepath (str): The filepath to check.
+        filepath (str): The dotted module name to check, e.g. 'ultralytics.utils'.
 
     Returns:
-        (bool): True if the file is part of a pip package, False otherwise.
+        (bool): True if the module spec is found and has an origin, False otherwise.
     """
     import importlib.util
 
@@ -932,7 +941,7 @@ def get_ubuntu_version():
     """Retrieve the Ubuntu version if the OS is Ubuntu.
 
     Returns:
-        (str): Ubuntu version or None if not an Ubuntu OS.
+        (str | None): Ubuntu version, e.g. '22.04', or None if not an Ubuntu OS.
     """
     if is_ubuntu():
         try:
@@ -950,6 +959,9 @@ def get_user_config_dir(sub_dir="Ultralytics"):
 
     Returns:
         (Path): The path to the user config directory.
+
+    Raises:
+        ValueError: If the operating system is not supported and YOLO_CONFIG_DIR is not set.
     """
     if env_dir := os.getenv("YOLO_CONFIG_DIR"):
         p = Path(env_dir).expanduser() / sub_dir
@@ -1120,8 +1132,9 @@ class Retry(contextlib.ContextDecorator):
     other unreliable processes.
 
     Attributes:
-        times (int): Maximum number of retry attempts.
-        delay (int): Initial delay between retries in seconds.
+        times (int): Maximum number of attempts, including the first call.
+        delay (int): Base delay in seconds; the wait after the n-th failed attempt is `delay * 2**n`.
+        verbose (bool): Whether to log a warning for each failed attempt.
 
     Examples:
         Example usage as a decorator:
@@ -1204,7 +1217,7 @@ def set_sentry():
     Conditions required to send errors (ALL conditions must be met or no errors will be reported):
         - sentry_sdk package is installed
         - sync=True in YOLO settings
-        - pytest is not running
+        - pytest and GitHub Actions are not running
         - running in a pip package installation
         - running in a non-git directory
         - running with rank -1 or 0
@@ -1242,6 +1255,7 @@ def set_sentry():
             if exc_type in {KeyboardInterrupt, FileNotFoundError} or "out of memory" in str(exc_value):
                 return None  # do not send event
 
+        event.get("extra", {}).pop("sys.argv", None)
         event["tags"] = {
             "sys_argv": ARGV[0],
             "sys_argv_name": Path(ARGV[0]).name,
@@ -1254,6 +1268,7 @@ def set_sentry():
         dsn="https://888e5a0778212e1d0314c37d4b9aae5d@o4504521589325824.ingest.us.sentry.io/4504521592406016",
         debug=False,
         auto_enabling_integrations=False,
+        include_local_variables=False,
         traces_sample_rate=1.0,
         release=__version__,
         environment="runpod" if is_runpod() else "production",
@@ -1382,7 +1397,7 @@ class SettingsManager(JSONDict):
         /new/runs/dir
     """
 
-    def __init__(self, file=SETTINGS_FILE, version="0.0.7"):
+    def __init__(self, file=SETTINGS_FILE, version="0.0.8"):
         """Initialize the SettingsManager with default settings and load user settings."""
         import hashlib
         import uuid
@@ -1407,7 +1422,6 @@ class SettingsManager(JSONDict):
             "comet": True,  # Comet integration
             "dvc": True,  # DVC integration
             "mlflow": True,  # MLflow integration
-            "neptune": True,  # Neptune integration
             "raytune": True,  # Ray Tune integration
             "tensorboard": False,  # TensorBoard logging
             "wandb": False,  # Weights & Biases logging
@@ -1418,7 +1432,7 @@ class SettingsManager(JSONDict):
         self.help_msg = (
             f"\nView Ultralytics Settings with 'yolo settings' or at '{self.file}'"
             "\nUpdate Settings with 'yolo settings key=value', i.e. 'yolo settings runs_dir=path/to/dir'. "
-            "For help see https://docs.ultralytics.com/quickstart#ultralytics-settings."
+            "For help see https://docs.ultralytics.com/usage/settings."
         )
 
         with torch_distributed_zero_first(LOCAL_RANK):
@@ -1465,7 +1479,12 @@ class SettingsManager(JSONDict):
         self.update({key: value})
 
     def update(self, *args, **kwargs):
-        """Update settings, validating keys and types."""
+        """Update settings, validating keys and types.
+
+        Raises:
+            KeyError: If a key is not a valid Ultralytics setting.
+            TypeError: If a value does not match the type of the setting's default.
+        """
         for arg in args:
             if isinstance(arg, dict):
                 kwargs.update(arg)
@@ -1494,18 +1513,18 @@ def deprecation_warn(arg, new_arg=None):
 
 
 def clean_url(url):
-    """Strip auth from URL, i.e. `https://example.com/path/file.txt?auth` -> `https://example.com/path/file.txt`."""
+    """Strip auth from URL, e.g. `https://example.com/path/file.txt?auth` -> `https://example.com/path/file.txt`."""
     url = Path(url).as_posix().replace(":/", "://")  # Pathlib turns :// -> :/, as_posix() for Windows
     return unquote(url).split("?", 1)[0]  # '%2F' to '/', split authentication query strings
 
 
 def url2file(url):
-    """Convert URL to filename, i.e. `https://example.com/path/file.txt?auth` -> `file.txt`."""
+    """Convert URL to filename, e.g. `https://example.com/path/file.txt?auth` -> `file.txt`."""
     return Path(clean_url(url)).name or "download"
 
 
 def vscode_msg(ext="ultralytics.ultralytics-snippets") -> str:
-    """Display a message to install Ultralytics-Snippets for VS Code if not already installed."""
+    """Return a message to install Ultralytics-Snippets for VS Code, or an empty string if already installed."""
     path = (USER_CONFIG_DIR.parents[2] if WINDOWS else USER_CONFIG_DIR.parents[1]) / ".vscode/extensions"
     obs_file = path / ".obsolete"  # file tracks uninstalled extensions, while source directory remains
     installed = any(path.glob(f"{ext}*")) and ext not in (obs_file.read_text("utf-8") if obs_file.exists() else "")

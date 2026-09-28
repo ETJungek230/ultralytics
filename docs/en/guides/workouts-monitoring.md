@@ -110,13 +110,12 @@ Here's a table with the `AIGym` arguments:
 
 The `AIGym` solution also supports a range of object tracking parameters:
 
-{% from "macros/solutions-track-args.md" import param_table %}
-{{ param_table(["tracker", "conf", "iou", "classes", "device"]) }}
+{% include "macros/solutions-track-args.md" %}
 
 Additionally, the following visualization settings can be applied:
 
 {% from "macros/visualization-args.md" import param_table %}
-{{ param_table(["show", "show_conf", "show_labels"]) }}
+{{ param_table(["show", "show_labels"]) }}
 
 ## FAQ
 
@@ -146,6 +145,7 @@ while cap.isOpened():
         break
     results = gym(im0)
 
+cap.release()
 cv2.destroyAllWindows()
 ```
 

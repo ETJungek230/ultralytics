@@ -1,13 +1,12 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+"""Utility functions for neural network modules."""
 
 import copy
-import math
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.nn.init import uniform_
 
 __all__ = "inverse_sigmoid", "multi_scale_deformable_attn_pytorch"
 
@@ -36,9 +35,8 @@ def bias_init_with_prob(prior_prob=0.01):
     """Initialize conv/fc bias value according to a given probability value.
 
     This function calculates the bias initialization value based on a prior probability using the inverse sigmoid
-    (logit)
-    function. It's commonly used in object detection models to initialize classification layers with a specific positive
-    prediction probability.
+    (logit) function. It's commonly used in object detection models to initialize classification layers with a specific
+    positive prediction probability.
 
     Args:
         prior_prob (float, optional): Prior probability for bias initialization.
@@ -54,26 +52,6 @@ def bias_init_with_prob(prior_prob=0.01):
     return float(-np.log((1 - prior_prob) / prior_prob))  # return bias_init
 
 
-def linear_init(module):
-    """Initialize the weights and biases of a linear module.
-
-    This function initializes the weights of a linear module using a uniform distribution within bounds calculated from
-    the output dimension. If the module has a bias, it is also initialized.
-
-    Args:
-        module (nn.Module): Linear module to initialize.
-
-    Examples:
-        >>> import torch.nn as nn
-        >>> linear = nn.Linear(10, 5)
-        >>> linear_init(linear)
-    """
-    bound = 1 / math.sqrt(module.weight.shape[0])
-    uniform_(module.weight, -bound, bound)
-    if hasattr(module, "bias") and module.bias is not None:
-        uniform_(module.bias, -bound, bound)
-
-
 def inverse_sigmoid(x, eps=1e-5):
     """Calculate the inverse sigmoid function for a tensor.
 
@@ -81,13 +59,14 @@ def inverse_sigmoid(x, eps=1e-5):
     operations, particularly in attention mechanisms and coordinate transformations.
 
     Args:
-        x (torch.Tensor): Input tensor with values in range [0, 1].
+        x (torch.Tensor): Input tensor with values in range [0, 1]; values outside this range are clamped.
         eps (float, optional): Small epsilon value to prevent numerical instability.
 
     Returns:
         (torch.Tensor): Tensor after applying the inverse sigmoid function.
 
     Examples:
+        >>> import torch
         >>> x = torch.tensor([0.2, 0.5, 0.8])
         >>> inverse_sigmoid(x)
         tensor([-1.3863,  0.0000,  1.3863])

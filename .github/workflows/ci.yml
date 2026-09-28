@@ -63,13 +63,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
-        if: matrix.os != 'cpu-latest'
         with:
           python-version: ${{ matrix.python }}
       - uses: ultralytics/actions/setup-uv@main
         with:
           python-version: ${{ matrix.python }}
-          activate-environment: ${{ matrix.os == 'cpu-latest' }}
       - name: Install requirements
         uses: ultralytics/actions/retry@main
         with:
@@ -77,14 +75,12 @@ jobs:
           retry_delay_seconds: 20
           timeout_minutes: 20
           run: |
-            uv_system_args=()
-            if [[ "${{ matrix.os }}" != "cpu-latest" ]]; then
-              uv_system_args=(--system)
-            fi
             # Pin PNNX until 20260704 NCNN inference segfault is fixed: https://github.com/pnnx/pnnx/issues/293
-            uv pip install "${uv_system_args[@]}" -e ".[export,export-executorch]" \
+            uv pip install --system -e ".[export,export-executorch]" \
               ncnn pnnx==20260526 "coverage[toml]" \
               --torch-backend cpu
+            # Core AI benchmark rows: export on macOS and x86_64 Linux, inference on macOS (a no-op on Linux arm64)
+            uv pip install --system -e ".[export-coreai]" --torch-backend cpu
       - name: Check environment
         run: |
           yolo checks
@@ -103,7 +99,7 @@ jobs:
         run: coverage run -a --source=ultralytics -m ultralytics.cfg.__init__ benchmark model='path with spaces/${{ matrix.model }}-seg.pt' imgsz=160 verbose=0.21
       - name: Benchmark PoseModel
         shell: bash
-        run: coverage run -a --source=ultralytics -m ultralytics.cfg.__init__ benchmark model='path with spaces/${{ matrix.model }}-pose.pt' imgsz=160 verbose=0.185
+        run: coverage run -a --source=ultralytics -m ultralytics.cfg.__init__ benchmark model='path with spaces/${{ matrix.model }}-pose.pt' imgsz=160 verbose=0.179
       - name: Benchmark OBBModel
         shell: bash
         run: coverage run -a --source=ultralytics -m ultralytics.cfg.__init__ benchmark model='path with spaces/${{ matrix.model }}-obb.pt' imgsz=160 verbose=0.371
@@ -165,7 +161,7 @@ jobs:
           if [ "${{ matrix.torch }}" != "latest" ]; then
               torch="torch==${{ matrix.torch }} torchvision==${{ matrix.torchvision }}"
           fi
-          uv pip install -e ".[export-base,solutions]" \
+          uv pip install -e ".[export-base,export-openvino,solutions]" \
             $torch aiohttp pytest-cov pytest-xdist "git+https://github.com/ultralytics/CLIP.git" \
             --torch-backend cpu
       - name: Check environment
@@ -318,7 +314,7 @@ jobs:
           if [ "${{ matrix.torch }}" != "latest" ]; then
             torch="torch==${{ matrix.torch }} torchvision==${{ matrix.torchvision }}"
           fi
-          uv pip install -e ".[export-base,solutions${legacy_extra}]" $torch \
+          uv pip install -e ".[export-base,export-openvino,solutions${legacy_extra}]" $torch \
             aiohttp faster-coco-eval mlflow pytest-cov pytest-xdist "git+https://github.com/ultralytics/CLIP.git" \
             --torch-backend cpu
       - name: Check environment
@@ -365,6 +361,8 @@ jobs:
     timeout-minutes: 360
     runs-on: ubuntu-latest
     steps:
+      - name: Cleanup disk space
+        uses: ultralytics/actions/cleanup-disk@main
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
@@ -373,7 +371,12 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install export system dependencies
-        run: sudo apt-get update && sudo apt-get install -y openjdk-21-jre flatbuffers-compiler
+        uses: ultralytics/actions/retry@main
+        with:
+          retries: 3
+          retry_delay_seconds: 60
+          timeout_minutes: 10
+          run: sudo apt-get update && sudo apt-get install -y openjdk-21-jre flatbuffers-compiler
       - name: Cache uv wheels
         uses: actions/cache@v6
         with:
@@ -414,7 +417,7 @@ jobs:
         run: uv cache prune --ci
 
   GPU:
-    if: github.repository == 'ultralytics/ultralytics' && (github.event_name != 'workflow_dispatch' || github.event.inputs.gpu == 'true')
+    if: github.repository == 'ultralytics/ultralytics' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'workflow_dispatch' || github.event.inputs.gpu == 'true')
     permissions:
       contents: read
       id-token: write
@@ -429,8 +432,8 @@ jobs:
           activate-environment: true
       - name: Install requirements
         run: |
-          # Install TensorRT into the job venv so uv can reuse the runner image cache.
-          uv pip install -e ".[export-base]" pytest-cov onnxruntime-gpu "torch<2.11" "tensorrt-cu12>=7.0.0,!=10.2.0" "nvidia-modelopt[onnx]>=0.44" lap  # TODO: remove torch pin after GPU runner driver update to CUDA 13.0
+          # Use the CUDA 13 ONNX Runtime wheel; ModelOpt still pins its CUDA 12 predecessor.
+          uv pip install -e ".[export-base]" pytest-cov onnxruntime-gpu tensorrt-cu13 "nvidia-modelopt[onnx]>=0.44" lap --torch-backend cu132 --excludes <(echo onnxruntime) --overrides <(echo "onnxruntime-gpu>=1.30.0")
         env:
           PIP_BREAK_SYSTEM_PACKAGES: 1
       - name: Check environment
@@ -459,9 +462,12 @@ jobs:
     if: github.repository == 'ultralytics/ultralytics' && (github.event_name == 'schedule' || github.event.inputs.raspberrypi == 'true')
     timeout-minutes: 120
     runs-on: raspberry-pi
+    concurrency: # a newer run-all on the same PR supersedes its queued/running hardware jobs
+      group: raspberry-pi-${{ github.event_name }}-${{ github.ref_name }}
+      cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
     steps:
       - name: Clean up runner
-        uses: eviden-actions/clean-self-hosted-runner@v1.4.39
+        uses: eviden-actions/clean-self-hosted-runner@v1.4.40
       - uses: actions/checkout@v7
       - name: Activate Virtual Environment for Tests
         run: |
@@ -520,7 +526,7 @@ jobs:
       - name: Benchmark SegmentationModel
         run: python -m ultralytics.cfg.__init__ benchmark model='yolo26n-seg.pt' imgsz=160 verbose=0.21
       - name: Benchmark PoseModel
-        run: python -m ultralytics.cfg.__init__ benchmark model='yolo26n-pose.pt' imgsz=160 verbose=0.185
+        run: python -m ultralytics.cfg.__init__ benchmark model='yolo26n-pose.pt' imgsz=160 verbose=0.179
       - name: Benchmark OBBModel
         run: python -m ultralytics.cfg.__init__ benchmark model='yolo26n-obb.pt' imgsz=160 verbose=0.371
       - name: Benchmark SemanticSegmentationModel
@@ -530,7 +536,7 @@ jobs:
           cat benchmarks.log
           echo "$(cat benchmarks.log)" >> $GITHUB_STEP_SUMMARY
       - name: Clean up runner
-        uses: eviden-actions/clean-self-hosted-runner@v1.4.39
+        uses: eviden-actions/clean-self-hosted-runner@v1.4.40
       # The below is fixed in: https://github.com/ultralytics/ultralytics/pull/15987
       # - name: Reboot # run a reboot command in the background to free resources for next run and not crash main thread
       #   run: sudo bash -c "sleep 10; reboot" &
@@ -539,6 +545,9 @@ jobs:
     if: github.repository == 'ultralytics/ultralytics' && (github.event_name == 'schedule' || github.event.inputs.nvidia-jetson == 'true')
     timeout-minutes: 120
     runs-on: ${{ matrix.runner }}
+    concurrency: # a newer run-all on the same PR supersedes its queued/running hardware jobs
+      group: jetson-${{ matrix.name }}-${{ github.event_name }}-${{ github.ref_name }}
+      cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
     strategy:
       fail-fast: false
       matrix:
@@ -560,7 +569,7 @@ jobs:
             onnxruntime_whl: "https://github.com/ultralytics/assets/releases/download/v0.0.0/onnxruntime_gpu-1.16.3-cp38-cp38-linux_aarch64.whl"
     steps:
       - name: Clean up runner
-        uses: eviden-actions/clean-self-hosted-runner@v1.4.39
+        uses: eviden-actions/clean-self-hosted-runner@v1.4.40
       - uses: actions/checkout@v7
       - uses: ultralytics/actions/setup-uv@main
       - name: Activate virtual environment
@@ -568,6 +577,7 @@ jobs:
           python${{ matrix.python }} -m venv env --system-site-packages
           source env/bin/activate
           echo PATH=$PATH >> $GITHUB_ENV
+          echo YOLO_CONFIG_DIR=$RUNNER_TEMP >> $GITHUB_ENV # per-runner settings; runners on one host share HOME
       - name: Install requirements
         uses: ultralytics/actions/retry@main
         with:
@@ -586,7 +596,7 @@ jobs:
       - name: Pytest tests
         run: pytest --slow tests/test_cuda.py
       - name: Clean up runner
-        uses: eviden-actions/clean-self-hosted-runner@v1.4.39
+        uses: eviden-actions/clean-self-hosted-runner@v1.4.40
 
   Conda:
     if: github.repository == 'ultralytics/ultralytics' && (github.event_name == 'schedule' || github.event.inputs.conda == 'true')
@@ -607,15 +617,17 @@ jobs:
       - uses: conda-incubator/setup-miniconda@v4
         with:
           python-version: ${{ matrix.python }}
-          channels: conda-forge,defaults
-          channel-priority: true
+          channels: conda-forge
+          channel-priority: strict
+          conda-remove-defaults: true
           activate-environment: anaconda-client-env
       - name: Install Ultralytics package from conda-forge
-        run: conda install -c pytorch -c conda-forge pytorch-cpu torchvision ultralytics openvino
+        timeout-minutes: 20
+        run: conda install --yes pytorch-cpu torchvision ultralytics openvino
       - name: Install pip packages
         run: |
           VERSION=$(python -c "from importlib.metadata import version; print(version('ultralytics'))")
-          uv pip install pytest "ultralytics[export-base,solutions]==${VERSION}" "git+https://github.com/ultralytics/CLIP.git"
+          uv pip install pytest "ultralytics[export-base,export-openvino,solutions]==${VERSION}" "git+https://github.com/ultralytics/CLIP.git"
       - name: Check environment
         run: conda list
       - name: Test benchmark CLI

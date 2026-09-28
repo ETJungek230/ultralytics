@@ -12,6 +12,10 @@ keywords: Ultralytics Platform, datasets, dataset management, dataset versioning
 
 A dataset is ready to train once processing has completed and it has at least one image in the `train` split, at least one image in either the `val` or `test` split, and at least one labeled image. The dataset header shows a `Ready` badge when all three conditions are met, and a `Not Ready` badge otherwise — click the badge to see exactly which condition is missing.
 
+## Collect Images with Agents
+
+Use [Agents](../agents.md#collect-images-for-review) to add images to a dataset when a model detection meets a condition, such as confidence within a chosen range. Connect the condition to a **Dataset** block and select a destination you can edit. Images arrive unlabeled in the `train` split; existing copies are skipped. Review and label them with the existing [annotation editor](annotation.md).
+
 ## Upload Dataset
 
 Ultralytics Platform accepts multiple upload formats for flexibility.
@@ -84,7 +88,7 @@ The file extension alone isn't enough: a video can still fail if its codec canno
 
 ### Preparing Your Dataset
 
-The Platform supports [Ultralytics YOLO](../../datasets/detect/index.md#ultralytics-yolo-format), [COCO](https://cocodataset.org/#format-data), [depth datasets](../../datasets/depth/index.md#depth-map-format), [Ultralytics NDJSON](../../datasets/detect/index.md#ultralytics-ndjson-format), and raw (unannotated) uploads:
+The Platform supports [Ultralytics YOLO](../../datasets/detect/index.md#ultralytics-yolo-format), [COCO](https://cocodataset.org/#format-data), [semantic PNG masks](../../datasets/semantic/index.md#png-mask-format), [depth datasets](../../datasets/depth/index.md#depth-map-format), [Ultralytics NDJSON](../../datasets/detect/index.md#ultralytics-ndjson-format), and raw (unannotated) uploads:
 
 === "YOLO Format"
 
@@ -197,6 +201,34 @@ The Platform supports [Ultralytics YOLO](../../datasets/detect/index.md#ultralyt
     Files pair by stem. Depth maps may use a smaller resolution than their RGB images when the aspect ratio matches.
     See the [depth dataset format](../../datasets/depth/index.md#depth-map-format).
 
+=== "Semantic Masks"
+
+    Semantic archives keep images and grayscale PNG masks in parallel `images/` and `masks/` folders, where each mask
+    pixel is a class ID and `255` marks ignored pixels. Platform converts every mask into polygon labels at import, so
+    the dataset behaves like any other semantic dataset in the editor, exports, and training.
+
+    ```text
+    my-semantic-dataset/
+    ├── data.yaml
+    ├── images/{train,val}/scene.png
+    └── masks/{train,val}/scene.png
+    ```
+
+    ```yaml
+    train: images/train
+    val: images/val
+    masks_dir: masks # optional when the folder is named masks/
+    names: {0: road, 1: car}
+    label_mapping: {7: 0, 26: 1} # optional: source pixel IDs to class IDs
+    ```
+
+    Masks pair with images by relative path and stem and must match the image size. Pixel values not listed in
+    `label_mapping` are kept as class IDs, and `255` or values mapped to `ignore_label` receive no polygon. Images
+    without a matching mask are skipped and counted as `invalid semantic mask` in the import summary. Masks take
+    precedence in a semantic dataset; when a new dataset's archive also carries YOLO `.txt` or COCO labels for another
+    task, those labels set the task and the masks are ignored. Connected cloud storage does not accept this layout. See
+    the [PNG mask format](../../datasets/semantic/index.md#png-mask-format).
+
 === "NDJSON"
 
     Ultralytics NDJSON exports can be uploaded directly back into Platform. This is useful for moving datasets between workspaces while preserving metadata, classes, splits, and annotations.
@@ -235,6 +267,7 @@ To create a dataset:
 6. Click `Create & Upload` for local files, `Create & Import` for a URL or connected source, or `Create Dataset` to start empty
 
 ![Ultralytics Platform Datasets Upload Dialog Task Selector](https://cdn.ul.run/i/9a60591229e11552b91f805de387893e.avif)<!-- screenshot -->
+
 To add files to an existing dataset, open its dataset page and either drag the files onto the gallery or click the upload icon in the page header. The upload icon opens your browser's native file picker directly because the dataset task is already defined.
 
 #### Data Sources
@@ -288,16 +321,17 @@ graph LR
 ```
 
 1. **Validation**: Format and size checks
-2. **Normalization**: Large images resized (max 4096px, min dimension 28px), grayscale expanded to RGB, transparency flattened onto white, and EXIF orientation applied
+2. **Normalization**: Large images resized (max 4096px, min dimension 28px), grayscale expanded to RGB, transparency flattened onto white, and EXIF orientation applied; TIFF originals are stored as uploaded
 3. **Thumbnails**: 256px WebP previews generated
 4. **Label Parsing**: [YOLO](../../datasets/detect/index.md#ultralytics-yolo-format), COCO, and [NDJSON](../../datasets/detect/index.md#ultralytics-ndjson-format) labels extracted
 5. **Statistics**: Class distributions and image dimensions computed
 
 !!! info "Stored Image Encoding"
 
-    AVIF and WebP originals are stored byte-for-byte when no resize or color change is needed. Everything else is re-encoded — WebP sources stay WebP, and all other formats (JPEG, PNG, BMP, TIFF, HEIC, JP2, DNG, MPO) become JPEG at quality 92. Your original filename and source extension are retained as metadata.
+    TIFF originals are always stored byte-for-byte, and AVIF and WebP originals are when no resize or color change is needed. Everything else is re-encoded — WebP sources stay WebP, and all other sources (JPEG, PNG, BMP, HEIC, JP2, DNG, MPO, and resized or color-changed AVIF) become JPEG at quality 92. Your original filename and source extension are retained as metadata.
 
 ![Ultralytics Platform Datasets Upload Progress Bar](https://cdn.ul.run/i/5ed3a283c82984bbc109ac647d26f73f.avif)<!-- screenshot -->
+
 ??? tip "Validate Before Upload"
 
     You can validate your dataset locally before uploading:
@@ -310,7 +344,7 @@ graph LR
 
 !!! warning "Image Size Requirements"
 
-    Images must be at least 28px on their shortest side. Images smaller than this are rejected during processing. Images larger than 4096px on their longest side are automatically resized with aspect ratio preserved.
+    Images must be at least 28px on their shortest side. Images smaller than this are rejected during processing. Images larger than 4096px on their longest side are automatically resized with aspect ratio preserved, except TIFF originals, which are stored as uploaded.
 
 ## Browse Images
 
@@ -349,20 +383,20 @@ Images can be sorted and filtered for efficient browsing:
 
 === "Filters"
 
-    | Filter           | Options                               |
-    | ---------------- | ------------------------------------- |
-    | **Split filter** | Train, Val, Test, or All              |
-    | **Annotations**  | All images, Annotated, or Unannotated |
-    | **Class filter** | Filter by class name                  |
-    | **Search**       | Filter images by filename or metadata |
+    | Filter           | Options                                            |
+    | ---------------- | -------------------------------------------------- |
+    | **Split filter** | Train, Val, Test, or All                           |
+    | **Annotations**  | All images, Annotated, or Unannotated              |
+    | **Class filter** | Filter by class name                               |
+    | **Search**       | Filter images by filename, class name, or metadata |
 
 !!! tip "Finding Unlabeled Images"
 
     Use the `Annotations` filter set to `Unannotated` to quickly find images that still need annotation. This is especially useful for large datasets where you want to track labeling progress.
 
-!!! tip "Searching Custom Metadata"
+!!! tip "Searching Images"
 
-    The search box sits at the right of the gallery toolbar and filters every view mode — grid, compact, and table. It matches the image filename (the file extension is optional) as well as custom metadata keys, scalar values, and array entries, so an image named `img_0042` carrying `{"ship_type": "yacht"}` is found by searching either `img_0042` or `yacht`.
+    The search box sits at the right of the gallery toolbar and filters every view mode — grid, compact, and table. It matches the image filename (the file extension is optional), the name of any class annotated in the image, and custom metadata keys, scalar values, and array entries, so an image named `img_0042` with a `boat` annotation and `{"ship_type": "yacht"}` metadata is found by searching `img_0042`, `boat`, or `yacht`.
 
     Values nested inside sub-objects are not matched. Pasting a 24-character image ID looks up that exact image
     directly, bypassing the text search.
@@ -467,6 +501,12 @@ If your dataset changes after analysis — new images arrive, or the analyzed co
 
 Click `Re-analyze` to recompute embeddings and the 2D projection from scratch.
 
+### Find Similar Images
+
+The same embeddings power similarity search across public datasets. In a dataset you can edit, right-click an image in **Grid** or **Compact** view (or a single selected row in **Table** view) and choose **Find similar images**. The dialog lists up to 24 of the nearest public images with their source dataset, license, and similarity score, excluding images your dataset already holds and copies of the selected image in other datasets. Select the ones you want and click **Add to dataset**: they are added to the `train` split as unlabeled images, counted against your storage, and ready for [annotation](annotation.md).
+
+An image without an embedding — in a dataset not yet analyzed, or added since the last analysis — is embedded when you open the dialog, so you do not need to run a [Clustering](#clustering) analysis first. The dialog is unavailable on [connected datasets](#what-is-not-available-for-connected-datasets). A model's [per-image validation diagnostics](../train/models.md#per-image-diagnostics) run the same search from its worst-performing images.
+
 ## Dataset Tabs
 
 Each dataset page can show up to six tabs, depending on the dataset state and your permissions:
@@ -490,6 +530,7 @@ Manage annotation classes for your dataset:
 - **Delete classes**: Select one or more rows and click `Delete`
 
 ![Ultralytics Platform Datasets Classes Tab Histogram And Table](https://cdn.ul.run/i/4436768ff6dd3de4184b44ddec5fb042.avif)<!-- screenshot -->
+
 !!! note "Log Scale for Imbalanced Datasets"
 
     If your dataset has class imbalance (e.g., 10,000 "person" annotations but only 50 "bicycle"), use the `Log Scale` toggle on the class histogram to visualize all classes clearly.
@@ -543,6 +584,7 @@ Charts appear in this order, and each one is omitted when the dataset has no dat
 | **Points per Instance**     | Polygon vertex or keypoint count per annotation (segment/pose)                   |
 
 ![Ultralytics Platform Datasets Charts Tab Statistics Grid](https://cdn.ul.run/i/7f75c56ff648ab3dfa612ba732283a6f.avif)<!-- screenshot -->
+
 !!! tip "Statistics Caching"
 
     The Platform caches computed statistics and invalidates them when images, annotations, classes, or splits change. On datasets larger than 100,000 images the charts are computed from a 100,000-image subset, noted above the grid.
@@ -580,6 +622,7 @@ Images that failed processing are listed here with:
 - Common errors include corrupted files, unsupported formats, images too small (min 28px), and unsupported color modes
 
 ![Ultralytics Platform Datasets Errors Tab Processing Failures](https://cdn.ul.run/i/bdf0b8ce26f807b8633305f27d3fbccd.avif)<!-- screenshot -->
+
 ??? info "Common Processing Errors"
 
     | Error                     | Cause                              | Fix                                 |
@@ -646,6 +689,7 @@ To export:
 3. Use the **Versions** tab when you want an immutable numbered snapshot you can re-download later
 
 ![Ultralytics Platform Datasets Export Ndjson Download](https://cdn.ul.run/i/46ba78e4a1e8489108dd1d999d59e7a7.avif)<!-- screenshot -->
+
 The NDJSON format stores one JSON object per line. The first line contains dataset metadata, followed by one line per image:
 
 ```json
@@ -678,16 +722,22 @@ See the [Ultralytics NDJSON format documentation](../../datasets/detect/index.md
 
 Right-click any image in **Grid** or **Compact** view to access quick actions:
 
-| Action            | Description                                     |
-| ----------------- | ----------------------------------------------- |
-| **Move to Split** | Reassign the image to Train, Val, or Test split |
-| **Download**      | Download the original image file                |
-| **Delete**        | Delete the image from the dataset               |
+| Action                      | Description                                                                                                          |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| **Move to Split**           | Reassign the image to Train, Val, or Test split                                                                      |
+| **Find Similar Images**     | Search public datasets for look-alike images and add them (see [Find Similar Images](#find-similar-images))          |
+| **Generate Similar Images** | Create up to 16 AI-generated variations of the image (four by default) and add the ones you keep as unlabeled images |
+| **Blur Faces**              | Blur the faces detected in the image (see [Blur Faces](#blur-faces))                                                 |
+| **Copy** / **Cut**          | Copy or cut the image to paste it into another dataset (see [Copy and Move Images](#copy-and-move-images))           |
+| **Paste**                   | Paste copied or cut images into this dataset; shown when the clipboard holds images from another dataset             |
+| **Download**                | Download the original image file                                                                                     |
+| **Delete**                  | Delete the image from the dataset                                                                                    |
 
 ![Ultralytics Platform Datasets Image Card Context Menu](https://cdn.ul.run/i/a5dd2918d992405d4f2fe7e6b51a76cc.avif)<!-- screenshot -->
+
 !!! tip "Single vs Bulk"
 
-    The image context menu operates on a **single image**. For bulk operations on multiple images, use **Table** view with checkbox selection.
+    The image context menu acts on the image you clicked, except **Paste**, which adds the clipboard's images. For bulk operations on multiple images, use **Table** view with checkbox selection.
 
 ### Bulk Move to Split
 
@@ -714,6 +764,7 @@ Redistribute all images across train, validation, and test splits using custom r
 4. Click **Apply** to randomly reassign all images according to your percentages
 
 ![Ultralytics Platform Datasets Split Redistribution Dialog](https://cdn.ul.run/i/cddfa652da98b5c8bcbd89894e33c2c9.avif)<!-- screenshot -->
+
 The dialog provides three ways to set your target split ratios:
 
 | Method   | Description                                                                                  |
@@ -735,6 +786,28 @@ Delete multiple images at once:
 1. Select images in the table view
 2. Right-click and choose `Delete`, or press `Cmd/Ctrl+Delete`
 3. Confirm deletion
+
+### Copy and Move Images
+
+Copy or move images from one dataset you can edit into another, including a dataset in a different workspace:
+
+1. In the source dataset, right-click an image in **Grid** or **Compact** view and choose **Copy** or **Cut**, or select images in **Table** view and press `Cmd/Ctrl+C` or `Cmd/Ctrl+X`. `Esc` clears the clipboard.
+2. Open the destination dataset, right-click an image and choose **Paste**, or press `Cmd/Ctrl+V`.
+
+Pasted images keep their labels and splits, and images the destination already holds in the same split are skipped. **Cut** removes the pasted images from the source dataset; **Copy** leaves it unchanged. The source and destination must have the same task and compatible image channels, pose keypoint settings, and depth scale, even when the copied images have no labels. An empty destination can inherit unset image-channel and pose settings. Images cannot be pasted into a [connected dataset](#what-is-not-available-for-connected-datasets).
+
+Classes are matched by name, ignoring case, and a destination without classes takes the source's class list. When a pasted image uses a class the destination does not have, the **Map classes** dialog asks you to map each such class to a dataset class or a new class, or to clear its **Include** checkbox to drop that class's labels; the images are pasted either way.
+
+### Blur Faces
+
+Blur the faces in a dataset's images, for example to protect the privacy of people in your data. Blur Faces is not available for [connected datasets](#what-is-not-available-for-connected-datasets) or for datasets with more than three image channels.
+
+- **One image:** right-click the image and choose **Blur faces**, or use the **Blur faces** button in the fullscreen viewer.
+- **Whole dataset:** open **More actions** (`⋯`) on the dataset page and choose **Blur faces**.
+
+The dialog first previews the detected faces on up to six images (or on the one image) without changing them. Adjust **Confidence** (default `0.25`) and **Box scale** (`0.5`–`1.5`, default `1`, which scales each face box around its center) to re-run the preview, then click **Apply** to replace the original pixels of every image in which faces are found. Images without detected faces are left unchanged, labels and splits are kept, and some faces may be missed, so review the result. Blurring a whole dataset costs $1.00 per 1,000 processed images, with a minimum of $0.01 per run (billed as **Auto-Annotation**), and the dialog shows the estimate before you apply; previews and single-image blurring are free.
+
+To blur faces in images as they are uploaded, turn on **Blur faces** when you create a dataset from **Upload** or **URL**, or **Blur future uploads** in the whole-dataset **Blur faces** dialog. Images uploaded to the dataset afterward are blurred during processing, at no charge.
 
 ## Dataset URI
 
@@ -782,24 +855,33 @@ The Platform supports the following licenses for datasets:
 | CC0-1.0         | Public domain       |
 | PDM-1.0         | Public domain       |
 | CC-BY-2.5       | Permissive          |
+| CC-BY-3.0       | Permissive          |
 | CC-BY-4.0       | Permissive          |
 | CC-BY-NC-2.0    | Non-commercial      |
-| CC-BY-SA-4.0    | Copyleft            |
+| CC-BY-NC-3.0    | Non-commercial      |
 | CC-BY-NC-4.0    | Non-commercial      |
+| CC-BY-SA-3.0    | Copyleft            |
+| CC-BY-SA-4.0    | Copyleft            |
 | CC-BY-NC-SA-3.0 | Copyleft            |
 | CC-BY-NC-SA-4.0 | Copyleft            |
 | CC-BY-ND-4.0    | No derivatives      |
+| CC-BY-NC-ND-2.0 | Non-commercial      |
 | CC-BY-NC-ND-4.0 | Non-commercial      |
 | Apache-2.0      | Permissive          |
 | MIT             | Permissive          |
+| BSD-3-Clause    | Permissive          |
 | AGPL-3.0        | Copyleft            |
+| GPL-2.0         | Copyleft            |
 | GPL-3.0         | Copyleft            |
+| LGPL-3.0        | Copyleft            |
+| ODbL-1.0        | Copyleft            |
+| DbCL-1.0        | Requires ODbL       |
 | Research-Only   | Restricted          |
 | Other           | Custom              |
 
 !!! note "Copyleft Licenses"
 
-    When cloning a dataset with a copyleft license (AGPL-3.0, GPL-3.0, CC-BY-SA-4.0, CC-BY-NC-SA-3.0, CC-BY-NC-SA-4.0), the clone inherits the license and the license selector is locked.
+    When cloning a dataset with a copyleft license (AGPL-3.0, GPL-2.0, GPL-3.0, LGPL-3.0, ODbL-1.0, CC-BY-SA-3.0, CC-BY-SA-4.0, CC-BY-NC-SA-3.0, CC-BY-NC-SA-4.0), the clone inherits the license and the license selector is locked.
 
 ## Visibility Settings
 
@@ -895,7 +977,7 @@ Your data is processed and stored in your selected region (US, EU, or AP). Image
 
 1. Validated for format and size
 2. Rejected if minimum dimension is below 28px
-3. Normalized if larger than 4096px (preserving aspect ratio; encoded for optimized storage)
+3. Normalized if larger than 4096px (preserving aspect ratio; encoded for optimized storage; TIFF stored as uploaded)
 4. Stored with deduplication, so identical images are kept only once
 5. Thumbnails generated at 256px WebP for fast browsing
 
@@ -911,6 +993,10 @@ Ultralytics Platform manages storage efficiently:
 ### Can I add images to an existing dataset?
 
 Yes. Drag files onto the dataset gallery or click the upload icon in the page header, which opens your browser's native file picker directly. New statistics are computed automatically after processing.
+
+### Can I copy or move images to another dataset?
+
+Yes. Copy or cut images in one dataset and paste them into another dataset you can edit; they keep their labels and splits, and **Cut** removes them from the source. Classes are matched by name, and the **Map classes** dialog handles any the destination does not have. See [Copy and Move Images](#copy-and-move-images).
 
 ### How do I move images between splits?
 
@@ -932,11 +1018,13 @@ Ultralytics Platform supports YOLO labels, COCO JSON, Ultralytics NDJSON, and ra
     | -------- | -------------------------------- | ----------------------------------- |
     | Detect   | `class cx cy w h`                | `0 0.5 0.5 0.2 0.3`                 |
     | Segment  | `class x1 y1 x2 y2 ...`          | `0 0.1 0.1 0.9 0.1 0.9 0.9`         |
+    | Semantic | `class x1 y1 x2 y2 ...`          | `0 0.1 0.1 0.9 0.1 0.9 0.9`         |
     | Pose     | `class cx cy w h kx1 ky1 v1 ...` | `0 0.5 0.5 0.2 0.3 0.6 0.7 2`       |
     | OBB      | `class x1 y1 x2 y2 x3 y3 x4 y4`  | `0 0.1 0.1 0.9 0.1 0.9 0.9 0.1 0.9` |
     | Classify | Directory structure              | `train/cats/`, `train/dogs/`        |
 
-    Pose visibility flags: 0=not labeled, 1=labeled but occluded, 2=labeled and visible.
+    Pose visibility flags: 0=not labeled, 1=labeled but occluded, 2=labeled and visible. Semantic datasets also accept
+    PNG masks instead of polygon files (see [Semantic Masks](#preparing-your-dataset)).
 
 === "COCO Format"
 
@@ -968,12 +1056,15 @@ Yes:
 
 Datasets that read from [cloud storage](../integrations/index.md) or [On Premise](../integrations/on-premise.md) sources keep their pixels outside Platform, so the features that need Platform-owned copies of the image bytes are unavailable:
 
-| Feature                                            | Cloud-connected | On Premise  |
-| -------------------------------------------------- | --------------- | ----------- |
-| [Smart annotation](annotation.md#smart-annotation) | Unavailable     | Unavailable |
-| [Clustering analysis](#clustering)                 | Unavailable     | Unavailable |
-| [Cloning](#clone-dataset)                          | Unavailable     | Unavailable |
-| [Version snapshots](#versions-tab)                 | Unavailable     | Unavailable |
-| [NDJSON export](#export-dataset)                   | Available       | Unavailable |
+| Feature                                                      | Cloud-connected | On Premise  |
+| ------------------------------------------------------------ | --------------- | ----------- |
+| [Smart and Batch Annotation](annotation.md#smart-annotation) | Unavailable     | Unavailable |
+| [Clustering analysis](#clustering)                           | Unavailable     | Unavailable |
+| [Cloning](#clone-dataset)                                    | Unavailable     | Unavailable |
+| [Version snapshots](#versions-tab)                           | Unavailable     | Unavailable |
+| [NDJSON export](#export-dataset)                             | Available       | Unavailable |
+| [Semantic PNG mask import](#preparing-your-dataset)          | Unavailable     | Available   |
+| [Blur faces](#blur-faces)                                    | Unavailable     | Unavailable |
+| [Pasting images](#copy-and-move-images) into the dataset     | Unavailable     | Unavailable |
 
 Browsing, manual annotation, class management, splits, statistics, and training all work normally.

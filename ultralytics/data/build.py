@@ -6,7 +6,6 @@ import math
 import os
 import random
 from collections.abc import Iterator
-from copy import copy
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -36,7 +35,7 @@ from ultralytics.data.loaders import (
     SourceTypes,
     autocast_list,
 )
-from ultralytics.data.utils import IMG_FORMATS, VID_FORMATS
+from ultralytics.data.utils import IMG_FORMATS, VID_FORMATS, add_polygon_background, get_split_fraction
 from ultralytics.utils import RANK, colorstr
 from ultralytics.utils.checks import check_file
 from ultralytics.utils.torch_utils import TORCH_1_13, TORCH_2_0, TORCH_2_7, get_torch_device_backend
@@ -63,8 +62,8 @@ class InfiniteDataLoader(dataloader.DataLoader):
         Create an infinite DataLoader for training
         >>> dataset = YOLODataset(...)
         >>> dataloader = InfiniteDataLoader(dataset, batch_size=16, shuffle=True)
-        >>> for batch in dataloader:  # Infinite iteration
-        >>>     train_step(batch)
+        >>> for batch in dataloader:  # one epoch of batches, workers persist across epochs
+        ...     train_step(batch)
     """
 
     def __init__(self, *args: Any, **kwargs: Any):
@@ -73,7 +72,7 @@ class InfiniteDataLoader(dataloader.DataLoader):
             kwargs.pop("prefetch_factor", None)  # not supported by earlier versions
         super().__init__(*args, **kwargs)
         object.__setattr__(self, "batch_sampler", _RepeatSampler(self.batch_sampler))
-        self.iterator = super().__iter__()
+        self.iterator = None  # fork workers on first iteration, not while another loader's pin-memory thread starts up
 
     def __len__(self) -> int:
         """Return the length of the batch sampler's sampler."""
@@ -81,6 +80,8 @@ class InfiniteDataLoader(dataloader.DataLoader):
 
     def __iter__(self) -> Iterator:
         """Yield one epoch of batches from the persistent iterator."""
+        if self.iterator is None:
+            self.iterator = self._get_iterator()
         for _ in range(len(self)):
             yield next(self.iterator)
 
@@ -102,7 +103,7 @@ class InfiniteDataLoader(dataloader.DataLoader):
     def reset(self):
         """Reset the iterator to allow modifications to the dataset during training."""
         self.close()  # free old worker pipes before creating new iterator
-        self.iterator = self._get_iterator()
+        self.iterator = None
 
 
 class _RepeatSampler:
@@ -236,7 +237,7 @@ def seed_worker(worker_id: int) -> None:
 
 def build_yolo_dataset(
     cfg: IterableSimpleNamespace,
-    img_path: str,
+    img_path: str | list[str],
     batch: int,
     data: dict[str, Any],
     mode: str = "train",
@@ -245,32 +246,48 @@ def build_yolo_dataset(
     multi_modal: bool = False,
     fraction: float | None = None,
 ) -> Dataset:
-    """Build and return a YOLO dataset based on configuration parameters."""
+    """Build and return a YOLO dataset based on configuration parameters.
+
+    Args:
+        cfg (IterableSimpleNamespace): Configuration namespace with dataset and augmentation hyperparameters.
+        img_path (str | list[str]): Path to the images directory, image list file, or list of either.
+        batch (int): Batch size.
+        data (dict[str, Any]): Dataset configuration dictionary.
+        mode (str, optional): Dataset mode, 'train' enables augmentation; any other value is treated as evaluation.
+        rect (bool, optional): Whether to use rectangular batches (also enabled when cfg.rect is True).
+        stride (int, optional): Model stride used for rectangular batch shapes.
+        multi_modal (bool, optional): Whether to build a YOLOMultiModalDataset with text annotations.
+        fraction (float | None, optional): Fraction of the dataset to use. If None, it is derived from cfg.fraction.
+
+    Returns:
+        (Dataset): A DepthDataset, SemanticDataset, PolygonSemanticDataset, YOLOMultiModalDataset, or YOLODataset
+            depending on cfg.task, the dataset configuration, and multi_modal.
+    """
     pad = 0.0 if mode == "train" else 0.5
     rect = cfg.rect or rect
     if cfg.task == "depth":
         dataset = DepthDataset
         pad, rect = 0.0, rect and mode == "train"  # depth val letterbox stretches, so pad and rect_shape are ignored
     elif cfg.task == "semantic":
-        data_path = Path(data.get("path", ""))
-        if "masks_dir" in data or (data_path / "masks").exists():
-            dataset = SemanticDataset
-        else:
-            dataset = PolygonSemanticDataset
+        dataset = SemanticDataset if data.get("masks_dir") else PolygonSemanticDataset
+        if dataset is PolygonSemanticDataset:
+            add_polygon_background(data)  # polygon labels need a background class; idempotent if already added
         pad = 0.0  # no pad for semantic
     elif multi_modal:
         dataset = YOLOMultiModalDataset
     else:
         dataset = YOLODataset
 
-    if fraction is None:
-        fraction = cfg.fraction if mode == "train" else 1.0
+    if data.get("complete"):
+        fraction = 1.0  # already limited during dataset download
+    elif fraction is None:
+        fraction = get_split_fraction(cfg.fraction, "train" if mode == "train" else cfg.split)
     return dataset(
         img_path=img_path,
         imgsz=cfg.imgsz,
         batch_size=batch,
         augment=mode == "train",
-        hyp=copy(cfg),
+        hyp=cfg,
         rect=rect,
         cache=cfg.cache or None,
         single_cls=cfg.single_cls or False,
@@ -294,7 +311,21 @@ def build_grounding(
     stride: int = 32,
     max_samples: int = 80,
 ) -> Dataset:
-    """Build and return a GroundingDataset based on configuration parameters."""
+    """Build and return a GroundingDataset based on configuration parameters.
+
+    Args:
+        cfg (IterableSimpleNamespace): Configuration namespace with dataset and augmentation hyperparameters.
+        img_path (str): Path to the images directory.
+        json_file (str): Path to the grounding annotation JSON file.
+        batch (int): Batch size.
+        mode (str, optional): Dataset mode, 'train' enables augmentation.
+        rect (bool, optional): Whether to use rectangular batches (also enabled when cfg.rect is True).
+        stride (int, optional): Model stride used for rectangular batch shapes.
+        max_samples (int, optional): Maximum number of text samples per image.
+
+    Returns:
+        (Dataset): The GroundingDataset instance.
+    """
     return GroundingDataset(
         img_path=img_path,
         json_file=json_file,
@@ -302,7 +333,7 @@ def build_grounding(
         imgsz=cfg.imgsz,
         batch_size=batch,
         augment=mode == "train",  # augmentation
-        hyp=copy(cfg),
+        hyp=cfg,
         rect=cfg.rect or rect,  # rectangular batches
         cache=cfg.cache or None,
         single_cls=cfg.single_cls or False,
@@ -311,12 +342,11 @@ def build_grounding(
         prefix=colorstr(f"{mode}: "),
         task=cfg.task,
         classes=cfg.classes,
-        fraction=cfg.fraction if mode == "train" else 1.0,
     )
 
 
 def build_dataloader(
-    dataset,
+    dataset: Dataset,
     batch: int,
     workers: int,
     shuffle: bool = True,
@@ -375,7 +405,7 @@ def build_dataloader(
         shuffle=shuffle and sampler is None,
         num_workers=nw,
         sampler=sampler,
-        prefetch_factor=4 if nw > 0 else None,  # increase over default 2
+        prefetch_factor=(4 if shuffle else 2) if nw > 0 else None,  # validation holds fewer batches between passes
         pin_memory=pin_memory,
         collate_fn=getattr(dataset, "collate_fn", None),
         worker_init_fn=seed_worker,
@@ -400,6 +430,9 @@ def check_source(
         from_img (bool): Whether the source is an image or list of images.
         in_memory (bool): Whether the source is an in-memory object.
         tensor (bool): Whether the source is a torch.Tensor.
+
+    Raises:
+        TypeError: If the source type is not supported.
 
     Examples:
         Check a file path source

@@ -28,9 +28,10 @@ graph TB
 
 ## Create Project
 
-Navigate to **Projects** in the sidebar and click **New Project**.
+Open **Train** in the sidebar and click the `+` to open the **New Project** dialog.
 
 ![Ultralytics Platform Projects List](https://cdn.ul.run/i/11ba0c7e59d846cbc7bde563701bc141.avif)<!-- screenshot -->
+
 ??? tip "Quick Create"
 
     You can also create a project from the Home page quick actions.
@@ -44,6 +45,7 @@ Enter your project details:
 - **License**: Optional license for your project (None, Apache-2.0, MIT, BSD-3-Clause, AGPL-3.0, GPL-3.0, LGPL-3.0, MPL-2.0, EUPL-1.1, Unlicense, CC0-1.0, Ultralytics-Enterprise, or Other). The **Ultralytics-Enterprise** license is for commercial use without AGPL requirements and is available with an Enterprise plan — see [Ultralytics Licensing](https://www.ultralytics.com/license). Enterprise workspaces preselect it for new projects.
 
 ![Ultralytics Platform New Project Dialog Name Visibility License](https://cdn.ul.run/i/81a34dad08ad659335f49cd7d9f7bcd9.avif)<!-- screenshot -->
+
 Click **Create Project** to finalize. Your new project appears in the Projects list and sidebar.
 
 ## Project Page
@@ -162,11 +164,11 @@ Compare model performance using the charts dashboard:
 
 Available chart groups:
 
-| Group             | Charts                                                                                |
-| ----------------- | ------------------------------------------------------------------------------------- |
-| **Metrics**       | Task metrics, such as mAP50, mAP50-95, precision, and recall for detection            |
-| **Loss**          | One chart per loss component (box, cls, dfl, …), training solid and validation dashed |
-| **Learning Rate** | lr/pg0, lr/pg1, lr/pg2                                                                |
+| Group             | Charts                                                                           |
+| ----------------- | -------------------------------------------------------------------------------- |
+| **Metrics**       | Task metrics, such as mAP50, mAP50-95, precision, and recall for detection       |
+| **Loss**          | One chart per loss component (box, cls, …), training solid and validation dashed |
+| **Learning Rate** | lr/pg0, lr/pg1, lr/pg2                                                           |
 
 Comparing models trained for different tasks works, but each model only draws on the charts for metrics it actually reported.
 
@@ -252,4 +254,4 @@ Yes, deleted projects go to Trash and can be restored within 30 days:
 
 ### Can I transfer models between projects?
 
-Yes, you can clone a model to a different project using the clone model dialog from the [model page](models.md#clone-model).
+Yes. Cut and paste or drag models between projects in the same workspace; see [Move Models Between Projects](models.md#move-models-between-projects). [Clone Model](models.md#clone-model) copies a completed model you do not own into your project instead.

@@ -12,6 +12,8 @@ keywords: Ultralytics, YOLO26, model validation, machine learning, object detect
 
 Validation is a critical step in the [machine learning](https://www.ultralytics.com/glossary/machine-learning-ml) pipeline, allowing you to assess the quality of your trained models. Val mode in Ultralytics YOLO26 provides a robust suite of tools and metrics for evaluating the performance of your [object detection](https://www.ultralytics.com/glossary/object-detection) models. This guide serves as a complete resource for understanding how to effectively use the Val mode to ensure that your models are both accurate and reliable.
 
+See the [unreleased YOLO27 preview](../models/yolo27.md#performance-metrics) for preliminary validation results.
+
 <p align="center">
   <br>
   <iframe loading="lazy" width="720" height="405" src="https://www.youtube.com/embed/j8uQc0qB91s?start=47"
@@ -43,11 +45,11 @@ These are the notable functionalities offered by YOLO26's Val mode:
 
 !!! tip
 
-    * YOLO26 models automatically remember their training settings, so you can validate a model at the same image size and on the original dataset easily with just `yolo val model=yolo26n.pt` or `YOLO("yolo26n.pt").val()`
+    * YOLO26 models automatically remember their training settings, so `yolo val model=path/to/best.pt` or `YOLO("path/to/best.pt").val()` validates at the training image size on the original dataset. Official weights fall back to the task default dataset; pass `data` to override.
 
 ## Usage Examples
 
-Validate a trained YOLO26n model [accuracy](https://www.ultralytics.com/glossary/accuracy) on the COCO8 dataset. No arguments are needed as the `model` retains its training `data` and arguments as model attributes. See the Arguments section below for a full list of validation arguments.
+Validate a trained YOLO26n model [accuracy](https://www.ultralytics.com/glossary/accuracy). No arguments are needed, as the `model` retains its training `data` and arguments as model attributes: `path/to/best.pt` validates on the dataset it was trained on. Official weights record a training dataset path that doesn't exist on your machine, so they fall back to the task default `coco8.yaml` with a warning. Pass `data` to validate on another dataset. See the Arguments section below for a full list of validation arguments.
 
 !!! warning "Windows Multi-Processing Error"
 
@@ -76,8 +78,8 @@ Validate a trained YOLO26n model [accuracy](https://www.ultralytics.com/glossary
     === "CLI"
 
         ```bash
-        yolo detect val model=yolo26n.pt      # val official model
-        yolo detect val model=path/to/best.pt # val custom model
+        yolo detect val model=yolo26n.pt data=coco8.yaml             # val official model
+        yolo detect val model=path/to/best.pt data=path/to/data.yaml # val custom model
         ```
 
 ## Arguments for YOLO Model Validation
@@ -164,7 +166,7 @@ The below examples showcase YOLO model validation with custom arguments in Pytho
     Each entry in `image_metrics` contains the following keys:
 
     | Key         | Description                                       |
-    |-------------|---------------------------------------------------|
+    | ----------- | ------------------------------------------------- |
     | `precision` | Precision score for the image (`tp / (tp + fp)`). |
     | `recall`    | Recall score for the image (`tp / (tp + fn)`).    |
     | `f1`        | Harmonic mean of precision and recall.            |
@@ -173,6 +175,8 @@ The below examples showcase YOLO model validation with custom arguments in Pytho
     | `fn`        | Number of false negatives for the image.          |
 
     This feature is available for detection, segmentation, pose, and OBB tasks.
+
+The returned metrics object also exposes export helpers for downstream analysis:
 
 | Method      | Return Type            | Description                                                                |
 | ----------- | ---------------------- | -------------------------------------------------------------------------- |
@@ -207,7 +211,7 @@ print(metrics.box.map)  # map50-95
 Alternatively, you can use the command-line interface (CLI):
 
 ```bash
-yolo val model=yolo26n.pt
+yolo detect val model=yolo26n.pt data=coco8.yaml
 ```
 
 For further customization, you can adjust various arguments like `imgsz`, `batch`, and `conf` in both Python and CLI modes. Check the [Arguments for YOLO Model Validation](#arguments-for-yolo-model-validation) section for the full list of parameters.
@@ -295,4 +299,4 @@ Example using CLI:
 yolo val model=yolo26n.pt save_json=True
 ```
 
-This functionality is particularly useful for further analysis or integration with other tools. Check the [Arguments for YOLO Model Validation](#arguments-for-yolo-model-validation) for more details.
+On detection datasets, `save_json=True` also reports small-, medium-, and large-object mAP through `faster-coco-eval`. Check the [Arguments for YOLO Model Validation](#arguments-for-yolo-model-validation) for more details.

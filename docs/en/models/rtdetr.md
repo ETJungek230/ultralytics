@@ -1,5 +1,5 @@
 ---
-title: RT-DETR: Real-Time Detection Transformer
+title: RT-DETR Real-Time Detection Transformer
 comments: true
 description: Explore Baidu's RT-DETR, a Vision Transformer-based real-time object detector offering high accuracy and adaptable inference speed. Learn more with Ultralytics.
 keywords: RT-DETR, Baidu, Vision Transformer, real-time object detection, PaddlePaddle, Ultralytics, pretrained models, decoder layer index, query count, AI, machine learning, computer vision
@@ -77,6 +77,10 @@ This example provides simple RT-DETR training and inference examples. For full d
         yolo predict model=rtdetr-l.pt source=path/to/bus.jpg
         ```
 
+!!! tip "Deterministic Training"
+
+    Set `deterministic=False` when training RT-DETR on CUDA with PyTorch 2.0 or later. Its deformable attention uses `F.grid_sample`, which has no deterministic CUDA backward, so `deterministic=True` cannot make the run reproducible and can reduce training throughput. `seed` still controls weight initialization, data order, and augmentation sampling.
+
 !!! tip "Faster Inference Trade-Offs"
 
     RT-DETR pretrained weights support two inference-time settings to reduce latency without retraining:
@@ -104,7 +108,7 @@ This example provides simple RT-DETR training and inference examples. For full d
 
 ## Supported Tasks and Modes
 
-This table presents the model types, the specific pretrained weights, the tasks supported by each model, and the various modes ([Train](../modes/train.md) , [Val](../modes/val.md), [Predict](../modes/predict.md), [Export](../modes/export.md)) that are supported, indicated by ✅ emojis.
+This table presents the model types, the specific pretrained weights, the tasks supported by each model, and the various modes ([Train](../modes/train.md), [Val](../modes/val.md), [Predict](../modes/predict.md), [Export](../modes/export.md)) that are supported, indicated by ✅ emojis.
 
 | Model Type          | Pretrained Weights                                                                        | Tasks Supported                        | Training | Validation | Inference | Export |
 | ------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------- | -------- | ---------- | --------- | ------ |
@@ -167,7 +171,7 @@ We would like to acknowledge Baidu and the [PaddlePaddle](https://github.com/Pad
 
 ### What is Baidu's RT-DETR model and how does it work?
 
-Baidu's RT-DETR (Real-Time Detection Transformer) is an advanced real-time object detector built upon the Vision Transformer architecture. It efficiently processes multiscale features by decoupling intra-scale interaction and cross-scale fusion through its efficient hybrid encoder. By employing IoU-aware query selection, the model focuses on the most relevant objects, enhancing detection accuracy. Its adaptable inference speed, achieved by adjusting decoder layers without retraining, makes RT-DETR suitable for various real-time object detection scenarios. Learn more about RT-DETR features in the [RT-DETR Arxiv paper](https://arxiv.org/pdf/2304.08069).
+Baidu's RT-DETR (Real-Time Detection Transformer) is an advanced real-time object detector built upon the Vision Transformer architecture. It efficiently processes multiscale features by decoupling intra-scale interaction and cross-scale fusion through its efficient hybrid encoder. By employing IoU-aware query selection, the model focuses on the most relevant objects, enhancing detection accuracy. Its adaptable inference speed, achieved by adjusting decoder layers without retraining, makes RT-DETR suitable for various real-time object detection scenarios. Learn more about RT-DETR features in the [RT-DETR arXiv paper](https://arxiv.org/pdf/2304.08069).
 
 ### How can I use the pretrained RT-DETR models provided by Ultralytics?
 

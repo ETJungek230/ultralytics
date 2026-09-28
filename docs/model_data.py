@@ -4,6 +4,7 @@ Module for YOLO model metadata.
 
 This module stores detailed metadata for various YOLO models including authors, organizations,
 publication dates, arXiv links, GitHub repositories, documentation URLs, and performance metrics.
+FLOPs values mirror each model's own docs page, which is their source of truth.
 When executed as a script, it serializes this metadata to a JSON file named "model_data.json".
 
 Examples:
@@ -20,11 +21,11 @@ data = {
         "github": "https://github.com/ultralytics/ultralytics",
         "docs": "https://docs.ultralytics.com/models/yolo26",
         "performance": {
-            "n": {"size": 640, "map": 40.9, "cpu": "", "t4": 1.7, "params": 2.4, "flops": 5.4},
-            "s": {"size": 640, "map": 48.6, "cpu": "", "t4": 2.5, "params": 9.5, "flops": 20.7},
-            "m": {"size": 640, "map": 53.1, "cpu": "", "t4": 4.7, "params": 20.4, "flops": 68.2},
-            "l": {"size": 640, "map": 55.0, "cpu": "", "t4": 6.2, "params": 24.8, "flops": 86.4},
-            "x": {"size": 640, "map": 57.5, "cpu": "", "t4": 11.8, "params": 55.7, "flops": 193.9},
+            "n": {"size": 640, "map": 40.9, "cpu": 38.9, "t4": 1.7, "params": 2.4, "flops": 5.5},
+            "s": {"size": 640, "map": 48.6, "cpu": 87.2, "t4": 2.5, "params": 9.5, "flops": 20.9},
+            "m": {"size": 640, "map": 53.1, "cpu": 220.0, "t4": 4.7, "params": 20.4, "flops": 68.4},
+            "l": {"size": 640, "map": 55.0, "cpu": 286.2, "t4": 6.2, "params": 24.8, "flops": 86.8},
+            "x": {"size": 640, "map": 57.5, "cpu": 525.8, "t4": 11.8, "params": 55.7, "flops": 194.4},
         },
     },
     "YOLO12": {
@@ -35,11 +36,11 @@ data = {
         "github": "https://github.com/sunsmarterjie/yolov12",
         "docs": "https://docs.ultralytics.com/models/yolo12",
         "performance": {
-            "n": {"size": 640, "map": 40.6, "cpu": "", "t4": 1.64, "params": 2.6, "flops": 6.5},
-            "s": {"size": 640, "map": 48.0, "cpu": "", "t4": 2.61, "params": 9.3, "flops": 21.4},
-            "m": {"size": 640, "map": 52.5, "cpu": "", "t4": 4.86, "params": 20.2, "flops": 67.5},
-            "l": {"size": 640, "map": 53.7, "cpu": "", "t4": 6.77, "params": 26.4, "flops": 88.9},
-            "x": {"size": 640, "map": 55.2, "cpu": "", "t4": 11.79, "params": 59.1, "flops": 199.0},
+            "n": {"size": 640, "map": 40.6, "cpu": "", "t4": 1.64, "params": 2.6, "flops": 7.5},
+            "s": {"size": 640, "map": 48.0, "cpu": "", "t4": 2.61, "params": 9.3, "flops": 23.3},
+            "m": {"size": 640, "map": 52.5, "cpu": "", "t4": 4.86, "params": 20.2, "flops": 70.7},
+            "l": {"size": 640, "map": 53.7, "cpu": "", "t4": 6.77, "params": 26.4, "flops": 95.4},
+            "x": {"size": 640, "map": 55.2, "cpu": "", "t4": 11.79, "params": 59.1, "flops": 208.9},
         },
     },
     "YOLO11": {
@@ -51,10 +52,10 @@ data = {
         "docs": "https://docs.ultralytics.com/models/yolo11",
         "performance": {
             "n": {"size": 640, "map": 39.5, "cpu": 56.1, "t4": 1.5, "params": 2.6, "flops": 6.5},
-            "s": {"size": 640, "map": 47.0, "cpu": 90.0, "t4": 2.5, "params": 9.4, "flops": 21.5},
-            "m": {"size": 640, "map": 51.5, "cpu": 183.2, "t4": 4.7, "params": 20.1, "flops": 68.0},
-            "l": {"size": 640, "map": 53.4, "cpu": 238.6, "t4": 6.2, "params": 25.3, "flops": 86.9},
-            "x": {"size": 640, "map": 54.7, "cpu": 462.8, "t4": 11.3, "params": 56.9, "flops": 194.9},
+            "s": {"size": 640, "map": 47.0, "cpu": 90.0, "t4": 2.5, "params": 9.4, "flops": 21.6},
+            "m": {"size": 640, "map": 51.5, "cpu": 183.2, "t4": 4.7, "params": 20.1, "flops": 68.1},
+            "l": {"size": 640, "map": 53.4, "cpu": 238.6, "t4": 6.2, "params": 25.3, "flops": 87.2},
+            "x": {"size": 640, "map": 54.7, "cpu": 462.8, "t4": 11.3, "params": 56.9, "flops": 195.3},
         },
     },
     "YOLOv10": {
@@ -65,12 +66,12 @@ data = {
         "github": "https://github.com/THU-MIG/yolov10",
         "docs": "https://docs.ultralytics.com/models/yolov10",
         "performance": {
-            "n": {"size": 640, "map": 39.5, "cpu": "", "t4": 1.56, "params": 2.3, "flops": 6.7},
-            "s": {"size": 640, "map": 46.7, "cpu": "", "t4": 2.66, "params": 7.2, "flops": 21.6},
-            "m": {"size": 640, "map": 51.3, "cpu": "", "t4": 5.48, "params": 15.4, "flops": 59.1},
-            "b": {"size": 640, "map": 52.7, "cpu": "", "t4": 6.54, "params": 24.4, "flops": 92.0},
-            "l": {"size": 640, "map": 53.3, "cpu": "", "t4": 8.33, "params": 29.5, "flops": 120.3},
-            "x": {"size": 640, "map": 54.4, "cpu": "", "t4": 12.2, "params": 56.9, "flops": 160.4},
+            "n": {"size": 640, "map": 38.5, "cpu": "", "t4": 1.84, "params": 2.3, "flops": 6.7},
+            "s": {"size": 640, "map": 46.3, "cpu": "", "t4": 2.49, "params": 7.2, "flops": 21.6},
+            "m": {"size": 640, "map": 51.1, "cpu": "", "t4": 4.74, "params": 15.4, "flops": 59.1},
+            "b": {"size": 640, "map": 52.5, "cpu": "", "t4": 5.74, "params": 19.1, "flops": 92.0},
+            "l": {"size": 640, "map": 53.2, "cpu": "", "t4": 7.28, "params": 24.4, "flops": 120.3},
+            "x": {"size": 640, "map": 54.4, "cpu": "", "t4": 10.70, "params": 29.5, "flops": 160.4},
         },
     },
     "YOLOv9": {
@@ -82,10 +83,10 @@ data = {
         "docs": "https://docs.ultralytics.com/models/yolov9",
         "performance": {
             "t": {"size": 640, "map": 38.3, "cpu": "", "t4": 2.3, "params": 2.0, "flops": 7.7},
-            "s": {"size": 640, "map": 46.8, "cpu": "", "t4": 3.54, "params": 7.1, "flops": 26.4},
-            "m": {"size": 640, "map": 51.4, "cpu": "", "t4": 6.43, "params": 20.0, "flops": 76.3},
-            "c": {"size": 640, "map": 53.0, "cpu": "", "t4": 7.16, "params": 25.3, "flops": 102.1},
-            "e": {"size": 640, "map": 55.6, "cpu": "", "t4": 16.77, "params": 57.3, "flops": 189.0},
+            "s": {"size": 640, "map": 46.8, "cpu": "", "t4": 3.54, "params": 7.2, "flops": 26.7},
+            "m": {"size": 640, "map": 51.4, "cpu": "", "t4": 6.43, "params": 20.1, "flops": 76.8},
+            "c": {"size": 640, "map": 53.0, "cpu": "", "t4": 7.16, "params": 25.5, "flops": 102.8},
+            "e": {"size": 640, "map": 55.6, "cpu": "", "t4": 16.77, "params": 58.1, "flops": 192.5},
         },
     },
     "YOLOv8": {
@@ -99,7 +100,7 @@ data = {
             "n": {"size": 640, "map": 37.3, "cpu": 80.4, "t4": 1.47, "params": 3.2, "flops": 8.7},
             "s": {"size": 640, "map": 44.9, "cpu": 128.4, "t4": 2.66, "params": 11.2, "flops": 28.6},
             "m": {"size": 640, "map": 50.2, "cpu": 234.7, "t4": 5.86, "params": 25.9, "flops": 78.9},
-            "l": {"size": 640, "map": 52.9, "cpu": 375.2, "t4": 9.06, "params": 43.7, "flops": 165.2},
+            "l": {"size": 640, "map": 52.9, "cpu": 375.2, "t4": 9.06, "params": 43.7, "flops": 165.1},
             "x": {"size": 640, "map": 53.9, "cpu": 479.1, "t4": 14.37, "params": 68.2, "flops": 257.8},
         },
     },
@@ -137,11 +138,11 @@ data = {
         "github": "https://github.com/ultralytics/yolov5",
         "docs": "https://docs.ultralytics.com/models/yolov5",
         "performance": {
-            "n": {"size": 640, "map": 28.0, "cpu": 73.6, "t4": 1.12, "params": 2.6, "flops": 7.7},
-            "s": {"size": 640, "map": 37.4, "cpu": 120.7, "t4": 1.92, "params": 9.1, "flops": 24.0},
-            "m": {"size": 640, "map": 45.4, "cpu": 233.9, "t4": 4.03, "params": 25.1, "flops": 64.2},
-            "l": {"size": 640, "map": 49.0, "cpu": 408.4, "t4": 6.61, "params": 53.2, "flops": 135.0},
-            "x": {"size": 640, "map": 50.7, "cpu": 763.2, "t4": 11.89, "params": 97.2, "flops": 246.4},
+            "n": {"size": 640, "map": 28.0, "cpu": "", "t4": 1.12, "params": 1.9, "flops": 4.5},
+            "s": {"size": 640, "map": 37.4, "cpu": "", "t4": 1.92, "params": 7.2, "flops": 16.5},
+            "m": {"size": 640, "map": 45.4, "cpu": "", "t4": 4.03, "params": 21.2, "flops": 49.0},
+            "l": {"size": 640, "map": 49.0, "cpu": "", "t4": 6.61, "params": 46.5, "flops": 109.1},
+            "x": {"size": 640, "map": 50.7, "cpu": "", "t4": 11.89, "params": 86.7, "flops": 205.7},
         },
     },
     "PP-YOLOE+": {
@@ -192,8 +193,8 @@ data = {
     "RTDETRv2": {
         "author": "Wenyu Lv, Yian Zhao, Qinyao Chang, Kui Huang, Guanzhong Wang, and Yi Liu",
         "org": "Baidu",
-        "date": "2023-04-17",
-        "arxiv": "https://arxiv.org/abs/2304.08069",
+        "date": "2024-07-24",
+        "arxiv": "https://arxiv.org/abs/2407.17140",
         "github": "https://github.com/lyuwenyu/RT-DETR/tree/main/rtdetrv2_pytorch",
         "docs": "https://github.com/lyuwenyu/RT-DETR/tree/main/rtdetrv2_pytorch#readme",
         "performance": {

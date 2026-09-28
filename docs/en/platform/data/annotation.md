@@ -1,13 +1,13 @@
 ---
 plans: [free, pro, enterprise]
 comments: true
-description: Learn to annotate images in Ultralytics Platform with manual tools, skeleton templates for pose estimation, and Smart annotation with SAM and YOLO models for detect, segment, semantic, and OBB tasks.
+description: Learn to annotate images in Ultralytics Platform with manual tools, skeleton templates for pose estimation, and Smart annotation with SAM models for detect, segment, semantic, and OBB tasks, YOLO models for those tasks and pose, or class-prompted models (hosted open-source or paid provider models) for detection datasets with 1–100 classes.
 keywords: Ultralytics Platform, annotation, labeling, SAM, auto-annotation, bounding box, polygon, keypoints, skeleton templates, pose estimation, segmentation, YOLO
 ---
 
 # Annotation Editor
 
-[Ultralytics Platform](https://platform.ultralytics.com) includes an annotation editor for labeling images with bounding boxes, polygons, keypoints, oriented boxes, and classifications. The editor supports manual drawing, [SAM-powered smart annotation](https://www.ultralytics.com/annotate), and predictions from compatible YOLO models.
+[Ultralytics Platform](https://platform.ultralytics.com) includes an annotation editor for labeling images with bounding boxes, polygons, keypoints, oriented boxes, and classifications. The editor supports manual drawing, [SAM-powered smart annotation](https://www.ultralytics.com/annotate), and predictions from compatible YOLO models or, on detection datasets with 1–100 classes, class-prompted models: hosted open-source models or paid provider models.
 
 ![Ultralytics Platform Annotate Editor Toolbar With Canvas](https://cdn.ul.run/i/fd13a4b1f4b8fad9ed5e736030a070cf.avif)<!-- screenshot -->
 
@@ -127,14 +127,14 @@ graph LR
 
 ## Annotation Modes
 
-`Draw` is the default mode for spatial annotation tasks. For detect, segment, semantic, and OBB datasets, the toolbar also provides `Smart` mode when Smart annotation is available:
+`Draw` is the default mode for spatial annotation tasks. For detect, segment, semantic, pose, and OBB datasets, the toolbar also provides `Smart` mode when Smart annotation is available:
 
-| Mode      | Description                                                                 | Shortcut |
-| --------- | --------------------------------------------------------------------------- | -------- |
-| **Draw**  | Default manual mode with task-specific drawing tools                        | `V`      |
-| **Smart** | SAM or YOLO model-assisted annotation (detect, segment, semantic, OBB only) | `S`      |
+| Mode      | Description                                                                                                                                                                                                                                         | Shortcut |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| **Draw**  | Default manual mode with task-specific drawing tools                                                                                                                                                                                                | `V`      |
+| **Smart** | Model-assisted annotation with SAM on detect, segment, semantic, and OBB datasets, with YOLO models on those and pose datasets, or with class-prompted models (hosted open-source or paid provider models) on detection datasets with 1–100 classes | `S`      |
 
-Pose annotation uses `Draw` with a skeleton template — the `Smart` button appears but is disabled and marked "Coming Soon". Classification uses the class sidebar directly and shows no drawing toolbar or `Smart` button at all.
+Pose annotation uses `Draw` with a skeleton template; its `Smart` mode offers YOLO pose models only, with no SAM picker or auto-apply toggle. Classification uses the class sidebar directly and shows no drawing toolbar or `Smart` button at all.
 
 Smart annotation is not currently available for [connected datasets](../integrations/index.md) backed by cloud or On Premise storage.
 
@@ -149,6 +149,7 @@ Draw rectangular boxes around objects:
 3. Release to complete the box
 
 ![Ultralytics Platform Annotate Detect Bounding Box Drawing](https://cdn.ul.run/i/03f7437fabd12653415375312874950c.avif)<!-- screenshot -->
+
 !!! tip "Resize and Move"
 
     - Drag 8 corner/edge handles to resize
@@ -164,6 +165,7 @@ Draw precise polygon masks:
 3. Double-click, click the first vertex, or press `Enter` or `Escape` to close the polygon
 
 ![Ultralytics Platform Annotate Segment Polygon Vertices](https://cdn.ul.run/i/be5cf764c0b8a32158064b352934cdff.avif)<!-- screenshot -->
+
 !!! tip "Edit Vertices"
 
     - Drag individual vertices to adjust
@@ -207,6 +209,7 @@ Create custom templates for any pose structure:
 6. Save the template for reuse across your dataset
 
 ![Ultralytics Platform Annotate Pose Custom Template](https://cdn.ul.run/i/17471f496ec024a8b1db75ac99d1bc09.avif)<!-- screenshot -->
+
 Custom templates are saved to your account and available in all pose datasets.
 
 !!! tip "Template Workflow"
@@ -239,7 +242,7 @@ Assign image-level class labels:
 
 ## Smart Annotation
 
-Smart annotation adds model-assisted annotation to the editor. In Smart mode, you can use [Segment Anything Model (SAM)](../../models/sam.md) for click-based annotation or use pretrained Ultralytics YOLO models and your own fine-tuned YOLO models to add predictions as annotations. Smart annotation is available for **detect**, **segment**, **semantic**, and **OBB** tasks.
+Smart annotation adds model-assisted annotation to the editor. In Smart mode, you can use [Segment Anything Model (SAM)](../../models/sam.md) for click-based annotation or use pretrained Ultralytics YOLO models and your own fine-tuned YOLO models to add predictions as annotations. On detection datasets with 1–100 classes, the picker also offers [class-prompted models](#class-prompted-smart-annotation) that detect the dataset's classes: six hosted open-source models, hosted text-prompted SAM 3 and SAM 3.1, and paid vision models from eight providers. SAM smart annotation is available for **detect**, **segment**, **semantic**, and **OBB** tasks; YOLO smart annotation also covers **pose**.
 
 ### SAM Smart Annotation
 
@@ -287,7 +290,7 @@ SAM smart annotation can generate:
 
 !!! warning "SAM Task Support"
 
-    SAM smart annotation is only available for **detect**, **segment**, **semantic**, and **OBB** tasks. Pose and classification require manual annotation.
+    SAM smart annotation is only available for **detect**, **segment**, **semantic**, and **OBB** tasks. Pose datasets use [YOLO smart annotation](#yolo-smart-annotation) instead, and classification requires manual annotation.
 
 #### Auto-Apply Mode
 
@@ -300,13 +303,14 @@ Auto-apply mode speeds up Smart annotation by automatically saving the SAM mask 
 | **Auto-apply OFF** (default) | Place points freely, press `Enter` to apply          |
 
 ![Ultralytics Platform Annotate Sam Auto Apply Toggle](https://cdn.ul.run/i/f58a86dfc093bd70d95901a53d7b0851.avif)<!-- screenshot -->
+
 !!! tip "When to Use Auto-Apply"
 
     Auto-apply is ideal for datasets with well-separated objects where a single click produces an accurate mask. For complex or overlapping objects, turn auto-apply off and use multiple positive/negative points to refine the mask before saving.
 
 #### SAM Model Selection
 
-When Smart mode is active, a model picker appears in the toolbar. Five SAM models are available — choose based on the speed vs. accuracy trade-off that suits your dataset:
+When Smart mode is active, a model picker appears in the toolbar. Six SAM models are available — choose based on the speed vs. accuracy trade-off that suits your dataset:
 
 | Model             | Size    | Speed    | Notes                      |
 | ----------------- | ------- | -------- | -------------------------- |
@@ -314,9 +318,11 @@ When Smart mode is active, a model picker appears in the toolbar. Five SAM model
 | **SAM 2.1 Small** | 88 MB   | Fast     |                            |
 | **SAM 2.1 Base**  | 154 MB  | Moderate |                            |
 | **SAM 2.1 Large** | 428 MB  | Slower   | Most accurate of SAM 2.1   |
-| **SAM 3**         | 3.45 GB | Slowest  | Default, latest generation |
+| **SAM 3**         | 3.45 GB | Slowest  |                            |
+| **SAM 3.1**       | 3.50 GB | Slowest  | Default, latest generation |
 
 ![Ultralytics Platform Annotate Sam Model Selector](https://cdn.ul.run/i/88703961af233af7fe5ddf35ff8a5f96.avif)<!-- screenshot -->
+
 Switching models while Smart mode is active re-initializes the predictor for the current image automatically.
 
 ### YOLO Smart Annotation
@@ -329,10 +335,34 @@ With a YOLO model selected, Smart annotation can add predictions from pretrained
 4. Review the added annotations and make any needed corrections
 
 ![Ultralytics Platform Annotate Smart Annotation Yolo Model](https://cdn.ul.run/i/5340dc36ed1da9a4804c4fc8ec5c4552.avif)<!-- screenshot -->
+
 !!! tip "YOLO Model Notes"
 
-    - The model picker only lists models that match the current dataset task.
+    - The model picker only lists models that match the current dataset task, so a pose dataset offers pose models.
     - Duplicate predictions are skipped when they overlap an existing annotation of the same class at IoU `0.7` or higher.
+
+### Class-Prompted Smart Annotation
+
+On a detection dataset with 1–100 classes, the model picker's **Open-source models** project lists six hosted models — **Moondream 3.1** (the default when you open Smart mode on a detection dataset), **Qwen3.8 27B**, **YOLOE-26x**, **Florence-2 Large**, **OWLv2 Large**, and **Grounding DINO Base**. The **Meta** project adds the hosted text-prompted **SAM 3 Text** and **SAM 3.1 Text**, which detect the dataset's classes across the whole image, and Meta's paid **muse-spark-1.3**. The **OpenAI**, **Anthropic**, **Google**, **DeepSeek**, **Z.ai**, **Kimi**, and **Xiaomi MiMo** projects list each provider's paid vision models. Select one and click `Predict` (or press `P`): the model detects the dataset's classes with model-specific thresholds and adds editable boxes that you review and save like YOLO predictions. These models return no confidence scores, so the prediction settings (confidence and IoU) are hidden while one is selected.
+
+A paid provider model runs with the provider key saved in the dataset workspace's [**Settings > API Keys**](../account/api-keys.md#provider-keys-for-agents-and-annotation); without one, the prediction fails with an **Add API key** action. The provider bills your key for each prediction.
+
+### Batch Annotation
+
+Batch Annotation runs one model — a YOLO model, or on detection datasets with 1–100 classes a class-prompted model — over a whole dataset instead of the open image. Open it from the dataset page with **More actions > Batch Annotation**, or from the **Inference All** action on the toast after a YOLO prediction in the editor. It is available to dataset editors on Platform-hosted datasets with up to three image channels, for every task except depth.
+
+1. Select a model from the picker (`Official`, including the **Open-source models** and provider projects on detection datasets with 1–100 classes, or `My Models`); on a detection dataset the dialog opens with Moondream 3.1 selected
+2. For a YOLO model, adjust the confidence (default `0.25`) and IoU (default `0.7`) sliders — the **Test run** strip shows what the model finds on a few sample images as you move them. A class-prompted model detects the dataset classes (1–100) with model-specific thresholds instead of these settings and returns no scores
+3. Turn on **Include annotated images** to also run over images that already have labels; the run adds what the model finds and keeps the labels they have
+4. Review the **Estimated Cost** and click **Start**
+
+By default only unlabeled images are annotated, and existing labels are never changed. A run needs dataset classes. For a YOLO model, if the model's classes differ from the dataset's, a **Map classes** step maps each model class to a dataset class or skips it, and on a dataset without classes it creates them — the run starts only after the classes exist. Starting a run saves a [dataset version](datasets.md#versions-tab) first, so you can restore the dataset if you don't like the result.
+
+The dataset page shows the run's progress, and **Stop** keeps and bills the images processed so far. When the run finishes, a summary shows the images processed and the annotations and classes added.
+
+!!! note "Batch Annotation Cost"
+
+    Batch Annotation costs $1.00 per 1,000 processed images, with a minimum of $0.01 per run. The estimate is held from your balance when the run starts and settled for the images actually processed; the charge appears on the [Billing tab](../account/billing.md#transaction-types) as **Auto-Annotation** once you dismiss the run summary. With a paid provider model, this is the Platform processing fee only: the provider also bills your API key for the test-run previews and the annotations.
 
 ## Class Sidebar
 
@@ -436,48 +466,48 @@ Efficient annotation with keyboard shortcuts:
 
 === "General"
 
-    | Shortcut                      | Action                       |
-    | ----------------------------- | ---------------------------- |
-    | `Cmd/Ctrl+S`                  | Save annotations             |
-    | `Cmd/Ctrl+Z`                  | Undo                         |
-    | `Cmd/Ctrl+Y`                  | Redo                         |
-    | `Escape`                      | Save / Deselect / Exit       |
-    | `Delete` / `Backspace`        | Delete selected annotation   |
-    | `Cmd/Ctrl+Delete`             | Delete image                 |
-    | `H`                           | Toggle all annotations       |
-    | `1-9`                         | Select class 1-9             |
-    | `Cmd/Ctrl+Scroll`             | Zoom in/out                  |
-    | `Cmd/Ctrl++` or `Cmd/Ctrl+=`  | Zoom in                      |
-    | `Cmd/Ctrl+-`                  | Zoom out                     |
-    | `Cmd/Ctrl+0`                  | Reset to fit                 |
-    | `Space+Drag`                  | Pan canvas when zoomed       |
-    | `Shift+Click`                 | Multi-select annotations     |
-    | `Cmd/Ctrl+A`                  | Select all annotations       |
-    | `Cmd/Ctrl+C`                  | Copy selected annotations    |
-    | `Cmd/Ctrl+X`                  | Cut selected annotations     |
-    | `Cmd/Ctrl+V`                  | Paste annotations            |
+    | Shortcut                     | Action                     |
+    | ---------------------------- | -------------------------- |
+    | `Cmd/Ctrl+S`                 | Save annotations           |
+    | `Cmd/Ctrl+Z`                 | Undo                       |
+    | `Cmd/Ctrl+Y`                 | Redo                       |
+    | `Escape`                     | Save / Deselect / Exit     |
+    | `Delete` / `Backspace`       | Delete selected annotation |
+    | `Cmd/Ctrl+Delete`            | Delete image               |
+    | `H`                          | Toggle all annotations     |
+    | `1-9`                        | Select class 1-9           |
+    | `Cmd/Ctrl+Scroll`            | Zoom in/out                |
+    | `Cmd/Ctrl++` or `Cmd/Ctrl+=` | Zoom in                    |
+    | `Cmd/Ctrl+-`                 | Zoom out                   |
+    | `Cmd/Ctrl+0`                 | Reset to fit               |
+    | `Space+Drag`                 | Pan canvas when zoomed     |
+    | `Shift+Click`                | Multi-select annotations   |
+    | `Cmd/Ctrl+A`                 | Select all annotations     |
+    | `Cmd/Ctrl+C`                 | Copy selected annotations  |
+    | `Cmd/Ctrl+X`                 | Cut selected annotations   |
+    | `Cmd/Ctrl+V`                 | Paste annotations          |
 
 === "Modes"
 
-    | Shortcut | Action                         |
-    | -------- | ------------------------------ |
-    | `V`      | Draw mode (manual, default)    |
-    | `S`      | Smart mode (SAM or YOLO model) |
+    | Shortcut | Action                                          |
+    | -------- | ----------------------------------------------- |
+    | `V`      | Draw mode (manual, default)                     |
+    | `S`      | Smart mode (SAM, YOLO, or class-prompted model) |
 
 === "Drawing"
 
-    | Shortcut                | Action                                                                                 |
-    | ----------------------- | -------------------------------------------------------------------------------------- |
-    | `Click+Drag`            | Draw bounding box (detect/OBB)                                                         |
-    | `Click`                 | Add polygon point (segment) / Place skeleton (pose) / Place SAM point (smart)          |
-    | `Shift (hold) + Move`   | Freehand draw — continuously adds polygon vertices as the mouse moves                  |
-    | `Click inside mask`     | Subtract region from SAM mask (negative point)                                         |
-    | `Click outside mask`    | Add to SAM mask (positive point)                                                       |
-    | `Shift (hold) + Click`  | Place multiple SAM points before auto-apply commits (Smart mode, auto-apply on)        |
-    | `A`                     | Toggle auto-apply (Smart mode)                                                         |
-    | `P`                     | Run YOLO prediction (Smart mode)                                                       |
-    | `Enter`                 | Complete polygon / Save SAM annotation                                                 |
-    | `Escape`                | Complete polygon / Save SAM annotation / Deselect / Exit                               |
+    | Shortcut               | Action                                                                          |
+    | ---------------------- | ------------------------------------------------------------------------------- |
+    | `Click+Drag`           | Draw bounding box (detect/OBB)                                                  |
+    | `Click`                | Add polygon point (segment) / Place skeleton (pose) / Place SAM point (smart)   |
+    | `Shift (hold) + Move`  | Freehand draw — continuously adds polygon vertices as the mouse moves           |
+    | `Click inside mask`    | Subtract region from SAM mask (negative point)                                  |
+    | `Click outside mask`   | Add to SAM mask (positive point)                                                |
+    | `Shift (hold) + Click` | Place multiple SAM points before auto-apply commits (Smart mode, auto-apply on) |
+    | `A`                    | Toggle auto-apply (SAM Smart mode)                                              |
+    | `P`                    | Run the selected YOLO or class-prompted model (Smart mode)                      |
+    | `Enter`                | Complete polygon / Save SAM annotation                                          |
+    | `Escape`               | Complete polygon / Save SAM annotation / Deselect / Exit                        |
 
 === "Arrange (Z-Order)"
 
@@ -489,6 +519,7 @@ Efficient annotation with keyboard shortcuts:
     | `Cmd/Ctrl+Shift+[` | Send to back   |
 
 ![Ultralytics Platform Annotate Keyboard Shortcuts Dialog](https://cdn.ul.run/i/6bb507eae033a53c4181106227895112.avif)<!-- screenshot -->
+
 ??? tip "View All Shortcuts"
 
     Click the keyboard icon in the annotation toolbar to open the shortcuts reference.
@@ -560,11 +591,11 @@ Yes, but for best results:
 
 ### Which SAM model should I use?
 
-**SAM 3** is the default and the latest generation model — start there for the highest quality masks. Switch to **SAM 2.1 Small** for a faster interactive workflow on common objects, or **SAM 2.1 Large** when you need higher mask precision on complex shapes. Use **SAM 2.1 Tiny** for maximum speed on simple, high-contrast objects.
+**SAM 3.1** is the default and the latest generation model — start there for the highest quality masks, with **SAM 3** still available. Switch to **SAM 2.1 Small** for a faster interactive workflow on common objects, or **SAM 2.1 Large** when you need higher mask precision on complex shapes. Use **SAM 2.1 Tiny** for maximum speed on simple, high-contrast objects.
 
 ### Which tasks support SAM smart annotation?
 
-SAM smart annotation is available for **detect**, **segment**, **semantic**, and **OBB** tasks. Pose and classification use manual annotation only — on pose datasets the `Smart` button is visible but disabled and marked "Coming Soon". Smart annotation is also unavailable on connected cloud and On Premise datasets.
+SAM smart annotation is available for **detect**, **segment**, **semantic**, and **OBB** tasks. On pose datasets, `Smart` mode runs [YOLO smart annotation](#yolo-smart-annotation) only, and classification uses manual annotation only. Smart annotation is also unavailable on connected cloud and On Premise datasets.
 
 ### Can I create custom skeleton templates for pose annotation?
 

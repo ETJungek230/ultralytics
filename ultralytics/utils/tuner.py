@@ -20,14 +20,14 @@ RAY_SEARCH_ALG_REQUIREMENTS = {
 }
 
 
-def _sanitize_tune_value(value: dict):
+def _sanitize_tune_value(value):
     """Convert NumPy-backed Tune values into native Python types for YAML serialization.
 
     Args:
-        value (dict): The value to convert. Can be a dict, list, tuple, NumPy scalar, or NumPy array.
+        value (Any): The value to convert. Can be a dict, list, tuple, NumPy scalar, NumPy array, or any other value.
 
     Returns:
-        The converted value with NumPy types replaced by native Python types.
+        (Any): The converted value with NumPy types replaced by native Python types.
     """
     if isinstance(value, dict):
         return {k: _sanitize_tune_value(v) for k, v in value.items()}
@@ -46,11 +46,12 @@ def _get_ray_search_alg_kind(search_alg):
     """Return the normalized Ray Tune search algorithm kind for known searcher objects.
 
     Args:
-        search_alg (str | ray.tune.search.Searcher): The search algorithm to identify. Can be None, a string, or a Ray
-            Tune searcher object.
+        search_alg (str | ray.tune.search.Searcher | None): The search algorithm to identify. Can be None, a string, or
+            a Ray Tune searcher object.
 
     Returns:
-        str | None: The normalized search algorithm name, or None if not recognized.
+        (str | None): The stripped, lowercased name for a non-empty string, the algorithm name for a recognized Ax,
+            BOHB, or ZOOpt searcher object, or None otherwise.
     """
     if search_alg is None:
         return None
@@ -76,7 +77,7 @@ def _validate_ax_search_space(space):
         space (dict): The hyperparameter search space to validate.
 
     Returns:
-        list: The converted Ax parameters.
+        (list): The converted Ax parameters.
 
     Raises:
         ImportError: If the required 'ax-platform' package is not installed.
@@ -96,7 +97,7 @@ def _create_ax_search(space, task):
         task (str): The task type (e.g., 'detect', 'segment', 'classify').
 
     Returns:
-        AxSearch (ray.tune.search.Searcher): The configured Ax search algorithm.
+        (ray.tune.search.ax.AxSearch): The configured Ax search algorithm.
 
     Raises:
         ImportError: If required Ax packages are not installed.
@@ -125,7 +126,8 @@ def _convert_bohb_search_space(space):
         (tuple): A tuple containing the ConfigSpace object and a dict of fixed parameters.
 
     Raises:
-        ValueError: If the search space contains grid search parameters or unsupported samplers.
+        ValueError: If the search space contains grid search parameters.
+        TypeError: If the search space contains quantized or otherwise unsupported samplers.
         ImportError: If required BOHB packages are not installed.
     """
     checks.check_requirements(RAY_SEARCH_ALG_REQUIREMENTS["bohb"])
@@ -199,7 +201,7 @@ def _create_nevergrad_search(task):
         task (str): The task type (e.g., 'detect', 'segment', 'classify').
 
     Returns:
-        (NevergradSearch): The configured Nevergrad search algorithm.
+        (ray.tune.search.nevergrad.NevergradSearch): The configured Nevergrad search algorithm.
 
     Raises:
         ImportError: If the 'nevergrad' package is not installed.
@@ -322,6 +324,20 @@ def _resolve_ray_search_alg(search_alg, task, space, iterations):
         if requirements:
             checks.check_requirements(requirements)
 
+        if normalized == "optuna":
+            from optuna.samplers import TPESampler
+            from ray.tune.search.optuna import OptunaSearch
+
+            return (
+                OptunaSearch(
+                    sampler=TPESampler(multivariate=True, constant_liar=True),
+                    metric=TASK2METRIC[task],
+                    mode="max",
+                ),
+                space,
+                normalized,
+            )
+
         from ray.tune.search import create_searcher
 
         return create_searcher(normalized, metric=TASK2METRIC[task], mode="max"), space, normalized
@@ -336,8 +352,8 @@ def run_ray_tune(
     space: dict | None = None,
     grace_period: int = 10,
     gpu_per_trial: int | None = None,
-    iterations: int = 10,
-    search_alg=None,
+    iterations: int = 300,
+    search_alg="optuna",
     **train_args,
 ):
     """Run hyperparameter tuning using Ray Tune.
@@ -349,12 +365,16 @@ def run_ray_tune(
         gpu_per_trial (int, optional): The number of GPUs to allocate per trial.
         iterations (int, optional): The maximum number of trials to run.
         search_alg (str | ray.tune.search.Searcher | ray.tune.search.SearchAlgorithm, optional): Search algorithm to
-            use. Strings are resolved to supported Ray Tune searchers. Pre-instantiated objects are reused, and known
-            searchers with special Tune param_space requirements are normalized automatically.
+            use. Defaults to Optuna multivariate TPE. Strings are resolved to supported Ray Tune searchers,
+            pre-instantiated objects are reused, and known searchers with special Tune param_space requirements are
+            normalized automatically.
         **train_args (Any): Additional arguments to pass to the `train()` method.
 
     Returns:
         (ray.tune.ResultGrid): A ResultGrid containing the results of the hyperparameter search.
+
+    Raises:
+        ModuleNotFoundError: If Ray Tune is not installed or the chosen search algorithm's dependencies are missing.
 
     Examples:
         >>> from ultralytics import YOLO
@@ -365,7 +385,7 @@ def run_ray_tune(
     """
     LOGGER.info("💡 Learn about RayTune at https://docs.ultralytics.com/integrations/ray-tune")
     try:
-        checks.check_requirements("ray[tune]", constrain=["pydantic>=2.0,<2.12"])
+        checks.check_requirements(["ray>=2.41.0", "ray[tune]"], constrain=["pydantic>=2.0,<2.12"])
 
         import ray
         from ray import tune
@@ -374,25 +394,17 @@ def run_ray_tune(
     except ImportError:
         raise ModuleNotFoundError('Ray Tune required but not found. To install run: pip install "ray[tune]"')
 
-    try:
-        import wandb
-
-        assert hasattr(wandb, "__version__")
-    except (ImportError, AssertionError):
-        wandb = False
-
-    checks.check_version(ray.__version__, ">=2.0.0", "ray")
     default_space = {
         # 'optimizer': tune.choice(['SGD', 'Adam', 'AdamW', 'NAdam', 'RAdam', 'RMSProp']),
         "lr0": tune.uniform(1e-5, 1e-2),  # initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
-        "lrf": tune.uniform(0.01, 1.0),  # final OneCycleLR learning rate (lr0 * lrf)
+        "lrf": tune.uniform(0.01, 1.0),  # final learning rate fraction (lr0 * lrf)
         "momentum": tune.uniform(0.7, 0.98),  # SGD momentum/Adam beta1
         "weight_decay": tune.uniform(0.0, 0.001),  # optimizer weight decay
         "warmup_epochs": tune.uniform(0.0, 5.0),  # warmup epochs (fractions ok)
         "warmup_momentum": tune.uniform(0.0, 0.95),  # warmup initial momentum
         "box": tune.uniform(1.0, 20.0),  # box loss gain
         "cls": tune.uniform(0.1, 4.0),  # cls loss gain (scale with pixels)
-        "cls_pw": tune.uniform(0.0, 1.0),  # cls power weight (scale with pixels)
+        "cls_pw": tune.uniform(0.0, 1.0),  # class weights power for class imbalance (0.0=disable)
         "dfl": tune.uniform(0.4, 12.0),  # dfl loss gain
         "hsv_h": tune.uniform(0.0, 0.1),  # image HSV-Hue augmentation (fraction)
         "hsv_s": tune.uniform(0.0, 0.9),  # image HSV-Saturation augmentation (fraction)
@@ -408,7 +420,7 @@ def run_ray_tune(
         "mosaic": tune.uniform(0.0, 1.0),  # image mosaic (probability)
         "mixup": tune.uniform(0.0, 1.0),  # image mixup (probability)
         "cutmix": tune.uniform(0.0, 1.0),  # image cutmix (probability)
-        "copy_paste": tune.uniform(0.0, 1.0),  # segment copy-paste (object fraction)
+        "copy_paste": tune.uniform(0.0, 1.0),  # segment/obb copy-paste (object fraction)
         "close_mosaic": tune.randint(0, 11),  # close dataloader mosaic (epochs)
     }
 
@@ -427,10 +439,7 @@ def run_ray_tune(
 
         # Set trial-specific name for W&B logging
         try:
-            if hasattr(tune, "get_context"):
-                trial_id = tune.get_context().get_trial_id()  # Ray ≥2.7, get current trial ID (e.g., "tune_c1c1ce99")
-            else:
-                trial_id = tune.get_trial_id()  # Ray <2.7
+            trial_id = tune.get_context().get_trial_id()
             trial_suffix = trial_id.split("_")[-1] if "_" in trial_id else trial_id
             config["name"] = f"{base_name}_{trial_suffix}"
         except Exception:
@@ -447,13 +456,14 @@ def run_ray_tune(
         return results.results_dict
 
     # Get search space
-    if not space and not train_args.get("resume"):
+    if not space:
         space = default_space
-        LOGGER.warning("Search space not provided, using default search space.")
+        if not train_args.get("resume"):
+            LOGGER.warning("Search space not provided, using default search space.")
 
     # Get dataset
     data = train_args.get("data", TASK2DATA[task])
-    space["data"] = data
+    space = {**space, "data": data}  # copy so the caller's space dict is not mutated
     if "data" not in train_args:
         LOGGER.warning(f'Data not provided, using default "data={data}".')
 

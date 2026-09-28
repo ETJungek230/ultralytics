@@ -14,13 +14,13 @@ If you're new to Ultralytics, the [Quickstart](../quickstart.md), [Modes](../mod
 
 - [`__init__`](__init__.md): Top-level package entry point with lazy imports for `YOLO`, `NAS`, `RTDETR`, `SAM`, `FastSAM`, `YOLOE`, and related model classes.
 - [`cfg`](cfg/__init__.md): Default configuration loading, CLI argument parsing, and the global `DEFAULT_CFG` used across training, validation, prediction, and export.
-- [`data`](data/dataset.md): Dataset classes, data loaders, augmentations, and format converters for detection, instance segmentation, semantic segmentation, classification, pose, OBB, and tracking.
+- [`data`](data/dataset.md): Dataset classes, data loaders, augmentations, and format converters for detection, instance segmentation, semantic segmentation, depth estimation, classification, pose, OBB, and tracking.
 - [`engine`](engine/model.md): Core training, validation, prediction, export, and tuning engine — the backbone of the `Model`, `Trainer`, `Validator`, `Predictor`, `Exporter`, and `Tuner` interfaces.
 - [`models`](models/yolo/model.md): Model implementations for YOLO, YOLOE, YOLO-World, SAM, SAM3, FastSAM, RT-DETR, and YOLO-NAS, including their predict, train, val, and export pipelines.
 - [`nn`](nn/tasks.md): Neural network building blocks — backbones, necks, heads, layers, and the multi-backend `AutoBackend` runtime (PyTorch, ONNX, TensorRT, CoreML, OpenVINO, LiteRT, and more).
 - [`optim`](optim/muon.md): Custom optimizers, including the Muon optimizer used for advanced training experiments.
 - [`solutions`](solutions/solutions.md): Ready-made [Ultralytics Solutions](../solutions/index.md) — object counting, heatmaps, AI Gym, parking management, region counting, similarity search, and more.
-- [`trackers`](trackers/track.md): Multi-object trackers (`BYTETracker`, `BoTSORT`) and the unified [tracking API](../modes/track.md) that plugs them into any YOLO model.
+- [`trackers`](trackers/track.md): Six multi-object trackers (`BOTSORT`, `BYTETracker`, `OCSORT`, `DeepOCSORT`, `FASTTracker`, and `TRACKTRACK`) and the unified [tracking API](../modes/track.md) that plugs them into compatible YOLO models.
 - [`utils`](utils/__init__.md): Cross-cutting utilities — logging, metrics, plotting, ops, downloads, checks, callbacks, and integrations with [Weights & Biases](../integrations/weights-biases.md), [MLflow](../integrations/mlflow.md), [Comet](../integrations/comet.md), and other tools.
 
 ## How this reference is generated

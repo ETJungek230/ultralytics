@@ -33,7 +33,7 @@ For open-vocabulary work that also needs instance masks, visual prompts, or a pr
 
 2. **Efficiency and Performance:** YOLO-World slashes computational and resource requirements without sacrificing performance, offering a robust alternative to models like SAM but at a fraction of the computational cost, enabling real-time applications.
 
-3. **Inference with Offline Vocabulary:** YOLO-World introduces a "prompt-then-detect" strategy, employing an offline vocabulary to enhance efficiency further. This approach enables the use of custom prompts computed apriori, including captions or categories, to be encoded and stored as offline vocabulary embeddings, streamlining the detection process.
+3. **Inference with Offline Vocabulary:** YOLO-World introduces a "prompt-then-detect" strategy, employing an offline vocabulary to enhance efficiency further. This approach enables the use of custom prompts computed a priori, including captions or categories, to be encoded and stored as offline vocabulary embeddings, streamlining the detection process.
 
 4. **Powered by YOLOv8:** Built upon [Ultralytics YOLOv8](yolov8.md), YOLO-World leverages the latest advancements in real-time object detection to facilitate open-vocabulary detection with unparalleled accuracy and speed.
 
@@ -66,16 +66,16 @@ This section details the models available with their specific pretrained weights
 
     === "Detection (COCO)"
 
-        | Model Type      | mAP  | mAP50 | mAP75 |
-        | --------------- | ---- | ----- | ----- |
-        | yolov8s-world   | 37.4 | 52.0  | 40.6  |
-        | yolov8s-worldv2 | 37.7 | 52.2  | 41.0  |
-        | yolov8m-world   | 42.0 | 57.0  | 45.6  |
-        | yolov8m-worldv2 | 43.0 | 58.4  | 46.8  |
-        | yolov8l-world   | 45.7 | 61.3  | 49.8  |
-        | yolov8l-worldv2 | 45.8 | 61.3  | 49.8  |
-        | yolov8x-world   | 47.0 | 63.0  | 51.2  |
-        | yolov8x-worldv2 | 47.1 | 62.8  | 51.4  |
+        | Model Type      | mAP      | mAP50    | mAP75    |
+        | --------------- | -------- | -------- | -------- |
+        | yolov8s-world   | 37.4     | 52.0     | 40.6     |
+        | yolov8s-worldv2 | 37.7     | 52.2     | 41.0     |
+        | yolov8m-world   | 42.0     | 57.0     | 45.6     |
+        | yolov8m-worldv2 | 43.0     | 58.4     | 46.8     |
+        | yolov8l-world   | 45.7     | 61.3     | 49.8     |
+        | yolov8l-worldv2 | 45.8     | 61.3     | 49.8     |
+        | yolov8x-world   | 47.0     | **63.0** | 51.2     |
+        | yolov8x-worldv2 | **47.1** | 62.8     | **51.4** |
 
 ## Usage Examples
 
@@ -104,7 +104,7 @@ The YOLO-World models are easy to integrate into your Python applications. Ultra
 
     === "Python"
 
-        [PyTorch](https://www.ultralytics.com/glossary/pytorch) pretrained `*.pt` models as well as configuration `*.yaml` files can be passed to the `YOLOWorld()` class to create a model instance in python:
+        [PyTorch](https://www.ultralytics.com/glossary/pytorch) pretrained `*.pt` models as well as configuration `*.yaml` files can be passed to the `YOLOWorld()` class to create a model instance in Python:
 
         ```python
         from ultralytics import YOLOWorld
@@ -123,7 +123,7 @@ The YOLO-World models are easy to integrate into your Python applications. Ultra
 
         ```bash
         # Load a pretrained YOLOv8s-worldv2 model and train it on the COCO8 example dataset for 100 epochs
-        yolo train model=yolov8s-worldv2.yaml data=coco8.yaml epochs=100 imgsz=640
+        yolo train model=yolov8s-worldv2.pt data=coco8.yaml epochs=100 imgsz=640
         ```
 
 ### Predict Usage
@@ -434,7 +434,7 @@ results = model.train(data="coco8.yaml", epochs=100, imgsz=640)
 Or using CLI:
 
 ```bash
-yolo train model=yolov8s-worldv2.yaml data=coco8.yaml epochs=100 imgsz=640
+yolo train model=yolov8s-worldv2.pt data=coco8.yaml epochs=100 imgsz=640
 ```
 
 ### What are the available pretrained YOLO-World models and their supported tasks?

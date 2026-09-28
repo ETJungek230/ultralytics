@@ -6,17 +6,19 @@ import glob
 import math
 import os
 import random
-from copy import deepcopy
+import shutil
+from copy import copy, deepcopy
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from typing import Any
 
 import cv2
 import numpy as np
+import torch
 from torch.utils.data import Dataset
 
-from ultralytics.data.utils import FORMATS_HELP_MSG, HELP_URL, IMG_FORMATS, check_file_speeds
-from ultralytics.utils import DEFAULT_CFG, LOCAL_RANK, LOGGER, NUM_THREADS, TQDM
+from ultralytics.data.utils import FORMATS_HELP_MSG, HELP_URL, IMG_FORMATS, check_file_speeds, get_split_fraction
+from ultralytics.utils import DEFAULT_CFG, LOCAL_RANK, LOGGER, NUM_THREADS, TQDM, IterableSimpleNamespace
 from ultralytics.utils.patches import imread
 
 
@@ -32,7 +34,7 @@ class BaseDataset(Dataset):
         augment (bool): Whether to apply data augmentation.
         single_cls (bool): Whether to treat all objects as a single class.
         prefix (str): Prefix to print in log messages.
-        fraction (float): Fraction of dataset to utilize.
+        fraction (float | int): Dataset ratio or image count to use.
         channels (int): Number of channels in the images (1 for grayscale, 3 for color). Color images loaded with OpenCV
             are in BGR channel order.
         cv2_flag (int): OpenCV flag for reading images.
@@ -70,30 +72,47 @@ class BaseDataset(Dataset):
     """
 
     class _ImageCache:
-        """Store images in one contiguous array to preserve copy-on-write sharing between workers."""
+        """Store images in one tensor, shared copy-on-write by fork workers and as shared memory by pickled ones."""
 
         def __init__(self, images: list[np.ndarray]):
-            """Pack images and their layouts into contiguous NumPy arrays."""
+            """Pack images into one contiguous uint8 tensor and their layouts into NumPy arrays."""
             self.shapes = np.array([im.shape for im in images])
             self.dtypes = np.array([im.dtype.str for im in images])
             self.offsets = np.concatenate(([0], np.cumsum([im.nbytes for im in images])))
-            self.buffer = np.empty(self.offsets[-1], dtype=np.uint8)
+            self.buffer = torch.empty(int(self.offsets[-1]), dtype=torch.uint8)
+            buffer = self.buffer.numpy()
             for i, im in enumerate(images):
-                self.buffer[self.offsets[i] : self.offsets[i + 1]] = im.reshape(-1).view(np.uint8)
+                buffer[self.offsets[i] : self.offsets[i + 1]] = im.reshape(-1).view(np.uint8)
                 images[i] = None
 
         def __getitem__(self, i: int) -> np.ndarray:
             """Return an image view by index."""
             i = range(len(self.shapes))[i]
-            return self.buffer[self.offsets[i] : self.offsets[i + 1]].view(self.dtypes[i]).reshape(self.shapes[i])
+            return (
+                self.buffer.numpy()[self.offsets[i] : self.offsets[i + 1]].view(self.dtypes[i]).reshape(self.shapes[i])
+            )
+
+        def __getstate__(self) -> dict[str, Any]:
+            """Pickle the buffer by value, as each worker's own copy, when Linux shared memory is too small to share it."""
+            state = self.__dict__.copy()
+            shm = Path("/dev/shm")  # also carries worker batches, so require the same 2x margin as check_cache_ram()
+            if not self.buffer.is_shared() and shm.is_dir() and shutil.disk_usage(shm).free < 2 * self.offsets[-1]:
+                LOGGER.warning(f"{shm} too small to share {self.offsets[-1] / (1 << 30):.1f}GB image cache, copying it")
+                state["buffer"] = self.buffer.numpy()
+            return state
+
+        def __setstate__(self, state: dict[str, Any]):
+            """Restore the buffer as a tensor."""
+            state["buffer"] = torch.as_tensor(state["buffer"])
+            self.__dict__.update(state)
 
     def __init__(
         self,
         img_path: str | list[str],
         imgsz: int = 640,
-        cache: bool | str = False,
+        cache: bool | str | None = False,
         augment: bool = True,
-        hyp: dict[str, Any] = DEFAULT_CFG,
+        hyp: IterableSimpleNamespace = DEFAULT_CFG,
         prefix: str = "",
         rect: bool = False,
         batch_size: int = 16,
@@ -109,9 +128,9 @@ class BaseDataset(Dataset):
         Args:
             img_path (str | list[str]): Path to the folder containing images or list of image paths.
             imgsz (int): Image size for resizing.
-            cache (bool | str): Cache images to RAM or disk during training.
+            cache (bool | str | None): Cache images to RAM (True or 'ram') or disk ('disk'); False or None disables.
             augment (bool): If True, data augmentation is applied.
-            hyp (dict[str, Any]): Hyperparameters to apply data augmentation.
+            hyp (IterableSimpleNamespace): Hyperparameters to apply data augmentation.
             prefix (str): Prefix to print in log messages.
             rect (bool): If True, rectangular training is used.
             batch_size (int): Size of batches.
@@ -119,7 +138,7 @@ class BaseDataset(Dataset):
             pad (float): Padding value.
             single_cls (bool): If True, single class training is used.
             classes (list[int], optional): List of included classes.
-            fraction (float): Fraction of dataset to utilize.
+            fraction (float | int): Dataset ratio or image count to use.
             channels (int): Number of channels in the images (1 for grayscale, 3 for color). Color images loaded with
                 OpenCV are in BGR channel order.
         """
@@ -129,7 +148,7 @@ class BaseDataset(Dataset):
         self.augment = augment
         self.single_cls = single_cls
         self.prefix = prefix
-        self.fraction = fraction
+        self.fraction = get_split_fraction(fraction, "train")
         self.channels = channels
         self.cv2_flag = cv2.IMREAD_GRAYSCALE if channels == 1 else cv2.IMREAD_COLOR
         self.im_files = self.get_img_files(self.img_path)
@@ -145,7 +164,7 @@ class BaseDataset(Dataset):
             self.set_rectangle()
 
         # Buffer thread for mosaic images
-        self.buffer = []  # buffer size = batch size
+        self.buffer = []  # indices of recently loaded images kept in memory for mosaic
         self.max_buffer_length = min((self.ni, self.batch_size * 8, 1000)) if self.augment else 0
 
         # Cache images (options are cache = True, False, None, "ram", "disk")
@@ -163,7 +182,7 @@ class BaseDataset(Dataset):
             self.cache_images()
 
         # Transforms
-        self.transforms = self.build_transforms(hyp=hyp)
+        self.transforms = self.build_transforms(hyp=copy(hyp))  # subclasses zero unsupported keys, never the caller's
 
     def get_img_files(self, img_path: str | list[str]) -> list[str]:
         """Read image files from the specified path.
@@ -197,13 +216,13 @@ class BaseDataset(Dataset):
             assert im_files, f"{self.prefix}No images found in {img_path}. {FORMATS_HELP_MSG}"
         except Exception as e:
             raise FileNotFoundError(f"{self.prefix}Error loading data from {img_path}\n{HELP_URL}") from e
-        if self.fraction < 1:
-            im_files = im_files[: round(len(im_files) * self.fraction)]  # retain a fraction of the dataset
+        count = self.fraction if isinstance(self.fraction, int) else max(1, round(len(im_files) * self.fraction))
+        im_files = im_files[:count] if count < len(im_files) else im_files
         check_file_speeds(im_files, prefix=self.prefix)  # check image read speeds
         return im_files
 
     def update_labels(self, include_class: list[int] | None) -> None:
-        """Update labels to include only specified classes.
+        """Update labels to include only specified classes, and set all classes to 0 if single_cls is True.
 
         Args:
             include_class (list[int], optional): List of classes to include. If None, all classes are included.
@@ -233,8 +252,8 @@ class BaseDataset(Dataset):
         Args:
             i (int): Index of the image to load.
             rect_mode (bool): Whether to use rectangular resizing (long side to imgsz).
-            resize_short (bool): Whether to resize the shorter side to imgsz while maintaining aspect ratio. Overrides
-                rect_mode when True.
+            resize_short (bool): Whether to resize the shorter side (instead of the longer side) to imgsz while
+                maintaining aspect ratio. Only used when rect_mode is True.
 
         Returns:
             im (np.ndarray): Loaded image as a NumPy array.
@@ -304,7 +323,7 @@ class BaseDataset(Dataset):
             pbar = TQDM(enumerate(results), total=self.ni, disable=LOCAL_RANK > 0)
             for i, x in pbar:
                 if self.cache == "disk":
-                    b += self.npy_files[i].stat().st_size
+                    b += self.npy_files[i].stat().st_size if self.npy_files[i].exists() else 0  # failed writes unlink
                 else:  # 'ram'
                     self.ims[i], self.im_hw0[i], self.im_hw[i] = x  # im, hw_orig, hw_resized = load_image(self, i)
                     b += self.ims[i].nbytes
@@ -321,9 +340,9 @@ class BaseDataset(Dataset):
                 np.save(f.as_posix(), imread(self.im_files[i], flags=self.cv2_flag), allow_pickle=False)
             except Exception as e:
                 f.unlink(missing_ok=True)
-                LOGGER.warning(f"{self.prefix}WARNING ⚠️ Failed to cache image {f}: {e}")
+                LOGGER.warning(f"{self.prefix}Failed to cache image {f}: {e}")
 
-    def check_cache_disk(self, safety_margin: float = 0.5) -> bool:
+    def check_cache_disk(self, safety_margin: float = 0.1) -> bool:
         """Check if there's enough disk space for caching images.
 
         Args:
@@ -332,8 +351,6 @@ class BaseDataset(Dataset):
         Returns:
             (bool): True if there's enough disk space, False otherwise.
         """
-        import shutil
-
         b, gb = 0, 1 << 30  # bytes of cached images, bytes per gigabytes
         n = min(self.ni, 30)  # extrapolate from 30 random images
         for _ in range(n):
@@ -371,7 +388,7 @@ class BaseDataset(Dataset):
         n = min(self.ni, 30)  # extrapolate from 30 random images
         for _ in range(n):
             b += self.load_image(random.randrange(self.ni))[0].nbytes
-        mem_required = b * self.ni / n * (1 + safety_margin)  # GB required to cache dataset into RAM
+        mem_required = b * self.ni / n * (1 + safety_margin)  # bytes required to cache dataset into RAM
         mem = __import__("psutil").virtual_memory()
         if mem_required > mem.available:
             self.cache = None
@@ -440,16 +457,24 @@ class BaseDataset(Dataset):
         """Customize your label format here."""
         return label
 
-    def build_transforms(self, hyp: dict[str, Any] | None = None):
-        """Users can customize augmentations here.
+    def build_transforms(self, hyp: IterableSimpleNamespace):
+        """Build the augmentation pipeline; subclasses must override this.
+
+        Args:
+            hyp (IterableSimpleNamespace): Hyperparameters for the transforms.
+
+        Returns:
+            (Compose): Composed transforms applied to each sample.
+
+        Raises:
+            NotImplementedError: If a subclass does not override this method.
 
         Examples:
-            >>> if self.augment:
-            ...     # Training transforms
-            ...     return Compose([])
-            >>> else:
-            ...    # Val transforms
-            ...    return Compose([])
+            >>> from ultralytics.data.augment import Compose
+            >>> from ultralytics.data.base import BaseDataset
+            >>> class CustomDataset(BaseDataset):
+            ...     def build_transforms(self, hyp):
+            ...         return Compose([])  # add training or validation transforms here
         """
         raise NotImplementedError
 
@@ -466,7 +491,7 @@ class BaseDataset(Dataset):
             ...     segments=segments,  # xy
             ...     keypoints=keypoints,  # xy
             ...     normalized=True,  # or False
-            ...     bbox_format="xyxy",  # or xywh, ltwh
+            ...     bbox_format="xywh",  # or xyxy, ltwh
             ... )
         """
         raise NotImplementedError

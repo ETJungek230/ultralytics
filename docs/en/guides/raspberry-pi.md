@@ -1,5 +1,5 @@
 ---
-title: YOLO26 on Raspberry Pi: Setup & Benchmarks
+title: YOLO26 on Raspberry Pi Setup & Benchmarks
 comments: true
 description: Deploy Ultralytics YOLO26 on Raspberry Pi 4 and 5 with install steps, NCNN export for fastest inference, camera setup, and benchmarks across eight formats.
 keywords: Ultralytics, YOLO26, Raspberry Pi, setup, guide, benchmarks, computer vision, object detection, NCNN, Docker, camera modules
@@ -36,15 +36,15 @@ Raspberry Pi is a small, affordable, single-board computer. It has become popula
 | ----------------- | -------------------------------------- | -------------------------------------- | -------------------------------------- |
 | CPU               | Broadcom BCM2837, Cortex-A53 64Bit SoC | Broadcom BCM2711, Cortex-A72 64Bit SoC | Broadcom BCM2712, Cortex-A76 64Bit SoC |
 | CPU Max Frequency | 1.4GHz                                 | 1.8GHz                                 | 2.4GHz                                 |
-| GPU               | Videocore IV                           | Videocore VI                           | VideoCore VII                          |
-| GPU Max Frequency | 400Mhz                                 | 500Mhz                                 | 800Mhz                                 |
-| Memory            | 1GB LPDDR2 SDRAM                       | 1GB, 2GB, 4GB, 8GB LPDDR4-3200 SDRAM   | 4GB, 8GB LPDDR4X-4267 SDRAM            |
+| GPU               | VideoCore IV                           | VideoCore VI                           | VideoCore VII                          |
+| GPU Max Frequency | 400MHz                                 | 500MHz                                 | 800MHz                                 |
+| Memory            | 1GB LPDDR2 SDRAM                       | 1GB, 2GB, 4GB, 8GB LPDDR4-3200 SDRAM   | 2GB, 4GB, 8GB, 16GB LPDDR4X-4267 SDRAM |
 | PCIe              | N/A                                    | N/A                                    | 1xPCIe 2.0 Interface                   |
 | Max Power Draw    | 2.5A@5V                                | 3A@5V                                  | 5A@5V (PD enabled)                     |
 
 ## What is Raspberry Pi OS?
 
-[Raspberry Pi OS](https://www.raspberrypi.com/software/) (formerly known as Raspbian) is a Unix-like operating system based on the Debian GNU/Linux distribution for the Raspberry Pi family of compact single-board computers distributed by the Raspberry Pi Foundation. Raspberry Pi OS is highly optimized for the Raspberry Pi with ARM CPUs and uses a modified LXDE desktop environment with the Openbox stacking window manager. Raspberry Pi OS is under active development, with an emphasis on improving the stability and performance of as many Debian packages as possible on Raspberry Pi.
+[Raspberry Pi OS](https://www.raspberrypi.com/software/) (formerly known as Raspbian) is a Unix-like operating system based on the Debian GNU/Linux distribution for the Raspberry Pi family of compact single-board computers distributed by the Raspberry Pi Foundation. Raspberry Pi OS is highly optimized for the Raspberry Pi with ARM CPUs and uses a lightweight desktop environment that runs on Wayland by default on Raspberry Pi 4 and 5. Raspberry Pi OS is under active development, with an emphasis on improving the stability and performance of as many Debian packages as possible on Raspberry Pi.
 
 ## Flash Raspberry Pi OS to Raspberry Pi
 
@@ -74,7 +74,7 @@ The Docker image already includes Ultralytics, so you can go straight to [export
 
 #### Install Ultralytics Package
 
-Here we will install Ultralytics package on the Raspberry Pi with optional dependencies so that we can export the [PyTorch](https://www.ultralytics.com/glossary/pytorch) models to other formats.
+Here we will install the Ultralytics package on the Raspberry Pi. Export dependencies for formats such as [NCNN](../integrations/ncnn.md) are installed automatically the first time you export a [PyTorch](https://www.ultralytics.com/glossary/pytorch) model, so only the base package is needed here.
 
 1. Update packages list, install pip and upgrade to latest
 
@@ -84,10 +84,10 @@ Here we will install Ultralytics package on the Raspberry Pi with optional depen
     pip install -U pip
     ```
 
-2. Install `ultralytics` pip package with optional dependencies
+2. Install `ultralytics` pip package
 
     ```bash
-    pip install ultralytics[export]
+    pip install ultralytics
     ```
 
 3. Reboot the device
@@ -147,30 +147,29 @@ YOLO26 is specifically designed to run on hardware-constrained devices such as t
 
     === "YOLO26 (ONNX)"
 
-        | Model   	| mAP50-95(B) 	| Inference time (ms/im) 	|
-        |---------	|-------------	|------------------------	|
-        | YOLO26n 	| 40.1        	| 128.42                 	|
-        | YOLO26s 	| 47.8        	| 352.84                 	|
-        | YOLO26m 	| 52.5        	| 993.78                 	|
-        | YOLO26l 	| 54.4        	| 1259.46                	|
-        | YOLO26x 	| 56.9        	| 2636.26                	|
-
+        | Model   | mAP50-95(B) | Inference time (ms/im) |
+        | ------- | ----------- | ---------------------- |
+        | YOLO26n | 40.1        | 128.42                 |
+        | YOLO26s | 47.8        | 352.84                 |
+        | YOLO26m | 52.5        | 993.78                 |
+        | YOLO26l | 54.4        | 1259.46                |
+        | YOLO26x | 56.9        | 2636.26                |
 
     === "YOLO11 (ONNX)"
 
-        | Model   	| mAP50-95(B) 	| Inference time (ms/im) 	|
-        |---------	|-------------	|------------------------	|
-        | YOLO11n 	| 39.5        	| 147.20                 	|
-        | YOLO11s 	| 47.0        	| 366.83                 	|
-        | YOLO11m 	| 51.5        	| 997.46                 	|
-        | YOLO11l 	| 53.4        	| 1274.95                	|
-        | YOLO11x 	| 54.7        	| 2646.76                	|
+        | Model   | mAP50-95(B) | Inference time (ms/im) |
+        | ------- | ----------- | ---------------------- |
+        | YOLO11n | 39.5        | 147.20                 |
+        | YOLO11s | 47.0        | 366.83                 |
+        | YOLO11m | 51.5        | 997.46                 |
+        | YOLO11l | 53.4        | 1274.95                |
+        | YOLO11x | 54.7        | 2646.76                |
 
     Benchmarked with Ultralytics 8.4.14.
 
 ## Raspberry Pi 5 YOLO26 Benchmarks
 
-YOLO26 [benchmarks](../modes/benchmark.md) were run by the Ultralytics team on eight different model formats measuring speed and [accuracy](https://www.ultralytics.com/glossary/accuracy): PyTorch, TorchScript, ONNX, OpenVINO, MNN, NCNN, ExecuTorch, LiteRT. Benchmarks were run on a Raspberry Pi 5 at FP32 [precision](https://www.ultralytics.com/glossary/precision) with default input image size of 640.
+YOLO26 [benchmarks](../modes/benchmark.md) were run by the Ultralytics team on eight different model formats measuring speed and [accuracy](https://www.ultralytics.com/glossary/accuracy): PyTorch, TorchScript, ONNX, OpenVINO, LiteRT, MNN, NCNN, ExecuTorch. Benchmarks were run on a Raspberry Pi 5 at FP32 [precision](https://www.ultralytics.com/glossary/precision) with default input image size of 640.
 
 ### Comparison Chart
 
@@ -183,35 +182,35 @@ We have only included benchmarks for YOLO26n and YOLO26s models because other mo
 
 ### Detailed Comparison Table
 
-The below table represents the benchmark results for two different models (YOLO26n, YOLO26s) across eight different formats (PyTorch, TorchScript, ONNX, OpenVINO, MNN, NCNN, ExecuTorch, LiteRT), running on a Raspberry Pi 5, giving us the status, size, mAP50-95(B) metric, and inference time for each combination.
+The below table represents the benchmark results for two different models (YOLO26n, YOLO26s) across eight different formats (PyTorch, TorchScript, ONNX, OpenVINO, LiteRT, MNN, NCNN, ExecuTorch), running on a Raspberry Pi 5, giving us the status, size, mAP50-95(B) metric, and inference time for each combination.
 
 !!! tip "Performance"
 
     === "YOLO26n"
 
-        | Format        | Status | Size on disk (MB) | mAP50-95(B) | Inference time (ms/im) |
-        |---------------|--------|-------------------|-------------|------------------------|
-        | PyTorch       | ✅      | 5.3               | 0.4760       | 299.09                |
-        | TorchScript   | ✅      | 9.8              | 0.4734      | 353.20                |
-        | ONNX          | ✅      | 9.5              | 0.4734      | 125.99                |
-        | OpenVINO      | ✅      | 9.6              | 0.4734      | 104.55                 |
-        | MNN           | ✅      | 9.4              | 0.4749      | 91.87                |
-        | NCNN          | ✅      | 9.4              | 0.4784      | 67.03                 |
-        | ExecuTorch    | ✅      | 9.4              | 0.4772      | 144.83                 |
-        | LiteRT        | ✅      | 9.8              | 0.4730      | 123.30                 |
+        | Format      | Status | Size on disk (MB) | mAP50-95(B) | Inference time (ms/im) |
+        | ----------- | ------ | ----------------- | ----------- | ---------------------- |
+        | PyTorch     | ✅     | 5.3               | 0.4760      | 299.09                 |
+        | TorchScript | ✅     | 9.8               | 0.4734      | 353.20                 |
+        | ONNX        | ✅     | 9.5               | 0.4734      | 125.99                 |
+        | OpenVINO    | ✅     | 9.6               | 0.4734      | 104.55                 |
+        | LiteRT      | ✅     | 9.8               | 0.4730      | 123.30                 |
+        | MNN         | ✅     | 9.4               | 0.4749      | 91.87                  |
+        | NCNN        | ✅     | 9.4               | 0.4784      | 67.03                  |
+        | ExecuTorch  | ✅     | 9.4               | 0.4772      | 144.83                 |
 
     === "YOLO26s"
 
-        | Format        | Status | Size on disk (MB) | mAP50-95(B) | Inference time (ms/im) |
-        |---------------|--------|-------------------|-------------|------------------------|
-        | PyTorch       | ✅      | 19.5              | 0.5703      | 848.65                 |
-        | TorchScript   | ✅      | 36.8              | 0.5632      | 1053.24               |
-        | ONNX          | ✅      | 36.5              | 0.5632      | 355.69                |
-        | OpenVINO      | ✅      | 36.7              | 0.5632      | 281.78                |
-        | MNN           | ✅      | 36.4              | 0.5614      | 237.24                |
-        | NCNN          | ✅      | 36.4              | 0.5684      | 172.88                |
-        | ExecuTorch    | ✅      | 36.5              | 0.5670      | 376.48                |
-        | LiteRT        | ✅      | 36.8              | 0.5630      | 360.00                |
+        | Format      | Status | Size on disk (MB) | mAP50-95(B) | Inference time (ms/im) |
+        | ----------- | ------ | ----------------- | ----------- | ---------------------- |
+        | PyTorch     | ✅     | 19.5              | 0.5703      | 848.65                 |
+        | TorchScript | ✅     | 36.8              | 0.5632      | 1053.24                |
+        | ONNX        | ✅     | 36.5              | 0.5632      | 355.69                 |
+        | OpenVINO    | ✅     | 36.7              | 0.5632      | 281.78                 |
+        | LiteRT      | ✅     | 36.8              | 0.5630      | 360.00                 |
+        | MNN         | ✅     | 36.4              | 0.5614      | 237.24                 |
+        | NCNN        | ✅     | 36.4              | 0.5684      | 172.88                 |
+        | ExecuTorch  | ✅     | 36.5              | 0.5670      | 376.48                 |
 
     Benchmarked with Ultralytics 8.4.108
 
@@ -248,11 +247,11 @@ To reproduce the above Ultralytics benchmarks on all [export formats](../modes/e
 
 !!! note "LiteRT export runs off-device"
 
-    `litert-converter` ships no `aarch64` Linux wheel, so `format=litert` export is only supported on Linux x86_64 and macOS, not on the Raspberry Pi itself. Export the `.tflite` model on a Linux x86_64 machine or a Mac, copy it to the Raspberry Pi, and use the Pi for inference.
+    `format=litert` export (via `litert-torch`) is only supported on Linux x86_64 and macOS, not on the Raspberry Pi itself. Export the `.tflite` model on a Linux x86_64 machine or a Mac, copy it to the Raspberry Pi, and use the Pi for inference.
 
 ## Use Raspberry Pi Camera
 
-When using Raspberry Pi for Computer Vision projects, it can be essential to grab real-time video feeds to perform inference. The onboard MIPI CSI connector on the Raspberry Pi allows you to connect official Raspberry PI camera modules. In this guide, we have used a [Raspberry Pi Camera Module 3](https://www.raspberrypi.com/products/camera-module-3/) to grab the video feeds and perform inference using YOLO26 models.
+When using Raspberry Pi for Computer Vision projects, it can be essential to grab real-time video feeds to perform inference. The onboard MIPI CSI connector on the Raspberry Pi allows you to connect official Raspberry Pi camera modules. In this guide, we have used a [Raspberry Pi Camera Module 3](https://www.raspberrypi.com/products/camera-module-3/) to grab the video feeds and perform inference using YOLO26 models.
 
 !!! tip
 
@@ -260,7 +259,7 @@ When using Raspberry Pi for Computer Vision projects, it can be essential to gra
 
 !!! note
 
-    Raspberry Pi 5 uses smaller CSI connectors than the Raspberry Pi 4 (15-pin vs 22-pin), so you will need a [15-pin to 22-pin adapter cable](https://www.raspberrypi.com/products/camera-cable/) to connect to a Raspberry Pi Camera.
+    Raspberry Pi 5 uses smaller CSI connectors than the Raspberry Pi 4 (22-pin vs 15-pin), so you will need a [15-pin to 22-pin adapter cable](https://www.raspberrypi.com/products/camera-cable/) to connect to a Raspberry Pi Camera.
 
 ### Test the Camera
 
@@ -374,7 +373,7 @@ There are a couple of best practices to follow in order to enable maximum perfor
 
 3. Overclock Raspberry Pi
 
-    If you want a little boost in performance while running Ultralytics YOLO26 models on Raspberry Pi 5, you can overclock the CPU from its base 2.4GHz to 2.9GHz and the GPU from 800MHz to 1GHz. If the system becomes unstable or crashes, reduce the overclock values by 100MHz increments. Ensure proper cooling is in place, as overclocking increases heat generation and may lead to thermal throttling.
+    If you want a little boost in performance while running Ultralytics YOLO26 models on Raspberry Pi 5, you can overclock the CPU from its base 2.4GHz to 3.0GHz and the GPU from 800MHz to 1GHz. If the system becomes unstable or crashes, reduce the overclock values by 100MHz increments. Ensure proper cooling is in place, as overclocking increases heat generation and may lead to thermal throttling.
 
     a. Upgrade the software
 
@@ -422,9 +421,9 @@ To set up Ultralytics YOLO26 on a Raspberry Pi without Docker, follow these step
     sudo apt install python3-pip -y
     pip install -U pip
     ```
-2. Install the Ultralytics package with optional dependencies:
+2. Install the Ultralytics package:
     ```bash
-    pip install ultralytics[export]
+    pip install ultralytics
     ```
 3. Reboot the device to apply changes:
     ```bash
@@ -479,7 +478,7 @@ Key differences include:
 
 - **CPU**: Raspberry Pi 4 uses Broadcom BCM2711, Cortex-A72 64-bit SoC, while Raspberry Pi 5 uses Broadcom BCM2712, Cortex-A76 64-bit SoC.
 - **Max CPU Frequency**: Raspberry Pi 4 has a max frequency of 1.8GHz, whereas Raspberry Pi 5 reaches 2.4GHz.
-- **Memory**: Raspberry Pi 4 offers up to 8GB of LPDDR4-3200 SDRAM, while Raspberry Pi 5 features LPDDR4X-4267 SDRAM, available in 4GB and 8GB variants.
+- **Memory**: Raspberry Pi 4 offers up to 8GB of LPDDR4-3200 SDRAM, while Raspberry Pi 5 features LPDDR4X-4267 SDRAM, available in 2GB, 4GB, 8GB, and 16GB variants.
 
 These enhancements contribute to better performance benchmarks for YOLO26 models on Raspberry Pi 5 compared to Raspberry Pi 4. Refer to the [Raspberry Pi Series Comparison](#raspberry-pi-series-comparison) table for more details.
 

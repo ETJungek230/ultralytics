@@ -4,8 +4,8 @@
 * `.pt` YOLO checkpoints — loaded via `YOLO()`; embeddings are pulled from the second-to-last
 layer through the predictor's `embed=[...]` argument (works with classification and ReID
 backbones).
-* Any other extension (`.torchscript`, `.onnx`, `.engine`, `.openvino`, …) — loaded via
-`AutoBackend`; the model is expected to output the embedding tensor directly.
+* Compatible exported models (`.torchscript`, `.onnx`, `.engine`, OpenVINO model directories, …) —
+loaded via `AutoBackend`; the model is expected to output the embedding tensor directly.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import torch
 from ultralytics.nn.autobackend import AutoBackend
 from ultralytics.utils.ops import xywh2xyxy
 from ultralytics.utils.plotting import save_one_box
+from ultralytics.utils.torch_utils import smart_inference_mode
 
 REID_ASSETS = frozenset(f"yolo26{k}-reid.onnx" for k in "nsmlx")
 
@@ -23,6 +24,7 @@ REID_ASSETS = frozenset(f"yolo26{k}-reid.onnx" for k in "nsmlx")
 class ReID:
     """ReID encoder. Routes `.pt` to the YOLO predictor path; everything else to `AutoBackend`."""
 
+    @smart_inference_mode(False)
     def __init__(self, model: str, imgsz: int = 224, device: str | torch.device | None = None, fp16: bool = False):
         """Initialize encoder for re-identification.
 
@@ -32,7 +34,8 @@ class ReID:
             imgsz (int): Square input size used for crop preprocessing on the AutoBackend path. Overridden by the
                 model's own static input size when one is detected.
             device (str | torch.device | None): Inference device; defaults to CUDA if available.
-            fp16 (bool): Use half precision when the backend supports it.
+            fp16 (bool): Request half precision on the AutoBackend path when the backend supports it. Ignored for `.pt`
+                models; models exported with FP16 inputs run in half precision regardless.
         """
         self.imgsz = imgsz
         self.batch_size = None
@@ -93,7 +96,15 @@ class ReID:
 
     @torch.no_grad()
     def __call__(self, img: np.ndarray, dets: np.ndarray) -> list[np.ndarray | None]:
-        """Extract embeddings for detected objects."""
+        """Extract embeddings for detected objects.
+
+        Args:
+            img (np.ndarray): BGR image containing the detections.
+            dets (np.ndarray): Detections in xywh format (first 4 columns used).
+
+        Returns:
+            (list[np.ndarray | None]): One embedding per detection, or None where the crop is empty.
+        """
         crops = self._crop_detections(img, dets)
         valid = [bool(c.size) for c in crops]
         valid_crops = [crop for crop, keep in zip(crops, valid) if keep]

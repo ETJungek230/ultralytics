@@ -92,6 +92,7 @@ Recover a deleted item (Editor role or higher in a team workspace):
 3. Click the **Restore** button (undo icon)
 
 ![Ultralytics Platform Settings Trash Tab Restore Button On Item](https://cdn.ul.run/i/2dd74fa1d628c9dc2c1bd7581f299976.avif)<!-- screenshot -->
+
 The item returns to its original location with all data intact.
 
 If the original slug is already taken, the platform restores the item with a unique available slug so you can access it immediately.
@@ -136,7 +137,8 @@ To permanently delete one item without waiting:
 
 For projects, permanent deletion also removes related deployments and export files that belong to the deleted workspace
 resources. If a deployment cannot be deleted, the Platform warns you and leaves it
-listed on the [Deployments](../deploy/endpoints.md) page so you can retry from there.
+listed on your profile's [Deployments tab](../deploy/index.md#deployments-tab); open its deployment page to retry
+deletion.
 
 ## Storage and Trash
 

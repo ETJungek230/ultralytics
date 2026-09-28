@@ -57,7 +57,21 @@ To install the required packages, run:
         pip install ultralytics
         ```
 
-The `dx_com` compiler package will be automatically installed from the DEEPX SDK repository on first export. For detailed instructions and best practices related to the installation process, check our [Ultralytics Installation guide](../quickstart.md). While installing the required packages for YOLO, if you encounter any difficulties, consult our [Common Issues guide](../guides/yolo-common-issues.md) for solutions and tips.
+The `dx_com` compiler is automatically installed from the [DEEPX SDK repository](https://sdk.deepx.ai/release/dxcom/v2.3.0/index.html) on first export. The current export workflow uses DX-COM 2.3.0, which provides wheels for Python 3.8–3.12 on x86-64 Linux with glibc 2.31 or newer.
+
+The compiler's PyPI releases are yanked. To preinstall the export dependencies, supply the SDK wheel page with `--find-links`; this works with both `pip` and `uv pip`:
+
+```bash
+pip install "ultralytics[export-deepx]" --find-links https://sdk.deepx.ai/release/dxcom/v2.3.0/index.html
+```
+
+For an editable repository install, replace `"ultralytics[export-deepx]"` with `-e ".[export-base,export-deepx]"`. To reproduce the Python 3.12 environment and smoke export used by CI, run the existing environment builder from the repository root:
+
+```bash
+ULTRALYTICS_ISOLATED_VENVS="$PWD/.venvs" python .github/scripts/create-export-env.py --env isolated-deepx
+```
+
+The environment builder requires [uv](https://docs.astral.sh/uv/getting-started/installation/) and an installed Ultralytics checkout. It installs the compiler from the SDK source and applies the tested dependency constraints automatically.
 
 ### Usage
 
@@ -149,10 +163,12 @@ For more details about the export process, visit the [Ultralytics documentation 
 
 After a successful export, a model directory is created with the following layout:
 
-    yolo26n_deepx_model/
-    ├── yolo26n.dxnn     # Compiled DEEPX model binary (NPU executable)
-    ├── config.json      # Calibration and preprocessing configuration
-    └── metadata.yaml    # Model metadata (classes, image size, task, etc.)
+```text
+yolo26n_deepx_model/
+├── yolo26n.dxnn     # Compiled DEEPX model binary (NPU executable)
+├── config.json      # Calibration and preprocessing configuration
+└── metadata.yaml    # Model metadata (classes, image size, task, etc.)
+```
 
 The `.dxnn` file is the compiled model binary that the `dx_engine` runtime loads directly on the NPU. The `metadata.yaml` contains class names, image size, and other information used by the Ultralytics inference pipeline.
 
@@ -231,21 +247,21 @@ The Ultralytics team benchmarked YOLO26 models, comparing speed and accuracy bet
         <img width="800" src="https://cdn.ul.run/i/857bf50e3c613f76c2b26b28311106ce.avif" alt="Raspberry Pi 5 DEEPX M1 NPU vs PyTorch benchmarks">
         </div>
 
-        | Model        	| Format  	| Status 	| Size (MB) 	| metrics/mAP50-95(B) 	| Inference time (ms/im) 	|
-        |--------------	|---------	|--------	|-----------	|---------------------	|------------------------	|
-        | YOLO26n      	| PyTorch 	| ✅      	| 5.3       	| 0.4760              	| 315.2                  	|
-        | YOLO26n      	| DEEPX   	| ✅      	| 6.6       	| 0.4660              	| 34.6                   	|
-        | YOLO26n-seg  	| PyTorch 	| ✅      	| 6.5       	| 0.4080              	| 485.4                  	|
-        | YOLO26n-seg  	| DEEPX   	| ✅      	| 7.9       	| 0.3920              	| 53.8                   	|
-        | YOLO26n-pose 	| PyTorch 	| ✅      	| 7.6       	| 0.4230              	| 506.3                  	|
-        | YOLO26n-pose 	| DEEPX   	| ✅      	| 8.8       	| 0.4590              	| 37.6                   	|
-        | YOLO26n-obb  	| PyTorch 	| ✅      	| 5.7       	| 0.817               	| 1094.4                 	|
-        | YOLO26n-obb  	| DEEPX   	| ✅      	| 7.3       	| 0.783               	| 56.4                   	|
+        | Model        | Format  | Status | Size (MB) | metrics/mAP50-95(B) | Inference time (ms/im) |
+        | ------------ | ------- | ------ | --------- | ------------------- | ---------------------- |
+        | YOLO26n      | PyTorch | ✅     | 5.3       | 0.4760              | 315.2                  |
+        | YOLO26n      | DEEPX   | ✅     | 6.6       | 0.4660              | 34.6                   |
+        | YOLO26n-seg  | PyTorch | ✅     | 6.5       | 0.4080              | 485.4                  |
+        | YOLO26n-seg  | DEEPX   | ✅     | 7.9       | 0.3920              | 53.8                   |
+        | YOLO26n-pose | PyTorch | ✅     | 7.6       | 0.4230              | 506.3                  |
+        | YOLO26n-pose | DEEPX   | ✅     | 8.8       | 0.4590              | 37.6                   |
+        | YOLO26n-obb  | PyTorch | ✅     | 5.7       | 0.817               | 1094.4                 |
+        | YOLO26n-obb  | DEEPX   | ✅     | 7.3       | 0.783               | 56.4                   |
 
-        | Model       	| Format  	| Status 	| Size (MB) 	| acc (top1) 	| acc (top5) 	| Inference time (ms/im) 	|
-        |-------------	|---------	|--------	|-----------	|------------	|------------	|------------------------	|
-        | YOLO26n-cls 	| PyTorch 	| ✅      	| 5.6       	| 0.431      	| 0.716      	| 23.8                   	|
-        | YOLO26n-cls 	| DEEPX   	| ✅      	| 5.9       	| 0.333      	| 0.686      	| 2.7                    	|
+        | Model       | Format  | Status | Size (MB) | acc (top1) | acc (top5) | Inference time (ms/im) |
+        | ----------- | ------- | ------ | --------- | ---------- | ---------- | ---------------------- |
+        | YOLO26n-cls | PyTorch | ✅     | 5.6       | 0.431      | 0.716      | 23.8                   |
+        | YOLO26n-cls | DEEPX   | ✅     | 5.9       | 0.333      | 0.686      | 2.7                    |
 
     === "More devices coming soon!"
 
@@ -253,7 +269,7 @@ The Ultralytics team benchmarked YOLO26 models, comparing speed and accuracy bet
 
     !!! note
 
-        Validation for the above benchmarks were done using coco128 for detection, coco128-seg for segmentation, coco8-pose for pose estimation, imagenet100 for classification and dota128 for OBB models. Inference time does not include pre/ post-processing.
+        Validation for the above benchmarks was done using COCO128 for detection, COCO128-seg for segmentation, COCO8-pose for pose estimation, ImageNet100 for classification and DOTA128 for OBB models. Inference time does not include pre/post-processing.
 
 !!! tip "Performance Optimization Tips"
 
@@ -355,7 +371,7 @@ Yes. Any model trained using [Ultralytics Train Mode](../modes/train.md) and exp
 
 ### How many calibration images should I use for DEEPX export?
 
-The DEEPX export pipeline uses every image in the calibration dataset with the EMA calibration method. A few hundred images is usually sufficient for good quantization accuracy. Point `data` at a smaller dataset if compilation time becomes a concern on large datasets.
+The DEEPX export pipeline configures the `dx_com` compiler for 100 EMA calibration steps over images from the calibration dataset. A few hundred images is usually sufficient for good quantization accuracy. Point `data` at a smaller dataset if compilation time becomes a concern on large datasets.
 
 ### How do I install the DEEPX runtime for inference?
 

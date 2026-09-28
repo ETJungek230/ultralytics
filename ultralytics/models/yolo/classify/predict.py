@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import cv2
+import numpy as np
 import torch
 from PIL import Image
 
@@ -22,6 +23,7 @@ class ClassificationPredictor(BasePredictor):
         args (dict): Configuration arguments for the predictor.
 
     Methods:
+        pre_transform: Resize and crop images on the host before the device-side conversion.
         preprocess: Convert input images to model-compatible format.
         postprocess: Process model predictions into Results objects.
 
@@ -33,7 +35,7 @@ class ClassificationPredictor(BasePredictor):
         >>> predictor.predict_cli()
 
     Notes:
-        - Torchvision classification models can also be passed to the 'model' argument, i.e. model='resnet18'.
+        - Torchvision classification models can also be passed to the 'model' argument, e.g. model='resnet18'.
     """
 
     def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks: dict | None = None):
@@ -52,6 +54,8 @@ class ClassificationPredictor(BasePredictor):
 
     def setup_source(self, source):
         """Set up source and inference mode and classify transforms."""
+        import torchvision.transforms as T  # scope for faster 'import ultralytics'
+
         super().setup_source(source)
         transforms = getattr(self.model.model, "transforms", None)  # missing on YAML-built and legacy checkpoints
         size = getattr(transforms.transforms[0], "size", max(self.imgsz)) if transforms is not None else None
@@ -63,10 +67,22 @@ class ClassificationPredictor(BasePredictor):
             )
         else:
             self.transforms = classify_transforms(self.imgsz, mean=[0] * self.ch, std=[1] * self.ch)
+        tfl = getattr(self.transforms, "transforms", ())
+        split = (
+            type(self.transforms) is T.Compose
+            and tuple(map(type, tfl)) == (T.Resize, T.CenterCrop, T.ToTensor, T.Normalize)
+            and getattr(self.model, "channels", 3) == 3
+        )
+        self.host_transforms = T.Compose(tfl[:2]) if split else None
+        self.device_transform = tfl[-1] if split else None
+
+    def pre_transform(self, im: list[np.ndarray]) -> list[np.ndarray]:
+        """Resize and crop images on the host, leaving uint8 BGR for the device-side conversion."""
+        return [np.array(self.host_transforms(Image.fromarray(x))) for x in im]
 
     def preprocess(self, img):
         """Convert input images to model-compatible tensor format with appropriate normalization."""
-        if not isinstance(img, torch.Tensor):
+        if self.device_transform is None and not isinstance(img, torch.Tensor):
             if self.ch == 3:
                 img = torch.stack(
                     [self.transforms(Image.fromarray(cv2.cvtColor(im, cv2.COLOR_BGR2RGB))) for im in img], dim=0
@@ -75,9 +91,11 @@ class ClassificationPredictor(BasePredictor):
                 img = torch.stack(
                     [self.transforms(Image.fromarray(im.reshape(im.shape[:2]))) for im in img], dim=0
                 )
-        img = (img if isinstance(img, torch.Tensor) else torch.from_numpy(img)).to(self.model.device)
-        img = img.half() if self.model.fp16 else img.float()  # Convert uint8 to fp16/32
-        return img
+            img = img.to(self.model.device)
+            return img.half() if self.model.fp16 else img.float()
+        is_tensor = isinstance(img, torch.Tensor)
+        img = super().preprocess(img)
+        return img if is_tensor else self.device_transform(img)
 
     def postprocess(self, preds, img, orig_imgs):
         """Process predictions to return Results objects with classification probabilities.

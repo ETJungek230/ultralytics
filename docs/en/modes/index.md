@@ -12,6 +12,8 @@ keywords: Ultralytics, YOLO26, machine learning, model training, validation, pre
 
 Ultralytics YOLO26 is not just another object detection model; it's a versatile framework designed to cover the entire lifecycle of [machine learning](https://www.ultralytics.com/glossary/machine-learning-ml) models—from data ingestion and model training to validation, deployment, and real-world tracking. Each mode serves a specific purpose and is engineered to offer you the flexibility and efficiency required for different tasks and use cases.
 
+For planned YOLO27 support, see the [YOLO27 preview](../models/yolo27.md#usage-examples). YOLO27 is coming soon and is not yet available; this guide uses released YOLO26 models.
+
 <p align="center">
   <br>
   <iframe loading="lazy" width="720" height="405" src="https://www.youtube.com/embed/j8uQc0qB91s?si=dhnGKgqvs7nPgeaM"
@@ -62,13 +64,13 @@ Export mode is used for converting a YOLO26 model to formats suitable for deploy
 
 ## [Track](track.md)
 
-Track mode extends YOLO26's object detection capabilities to track objects across video frames or live streams. This mode is particularly valuable for applications requiring persistent object identification, such as [surveillance systems](https://www.ultralytics.com/blog/shattering-the-surveillance-status-quo-with-vision-ai) or [self-driving cars](https://www.ultralytics.com/solutions/computer-vision-in-automotive). Track mode implements sophisticated trackers such as TrackTrack (default), BoT-SORT and ByteTrack to maintain object identity across frames, even when objects temporarily disappear from view.
+Track mode extends YOLO26's object detection capabilities to track objects across video frames or live streams. This mode is particularly valuable for applications requiring persistent object identification, such as [surveillance systems](https://www.ultralytics.com/blog/shattering-the-surveillance-status-quo-with-vision-ai) or [self-driving cars](https://www.ultralytics.com/solutions/computer-vision-in-automotive). It includes six trackers: TrackTrack (default), BoT-SORT, ByteTrack, OC-SORT, Deep OC-SORT, and FastTracker.
 
 [Track Examples](track.md){ .md-button }
 
 ## [Benchmark](benchmark.md)
 
-Benchmark mode profiles the speed and accuracy of various export formats for YOLO26. This mode provides comprehensive metrics on model size, accuracy (mAP50-95 for detection tasks or accuracy_top1 for classification), and inference time across different formats like ONNX, [OpenVINO](../integrations/openvino.md), and TensorRT. Benchmarking helps you select the optimal export format based on your specific requirements for speed and accuracy in your deployment environment.
+Benchmark mode profiles the speed and accuracy of various export formats for YOLO26. This mode provides comprehensive metrics on model size, accuracy (mAP50-95 for detection, segmentation, pose, and OBB; mIoU for semantic segmentation; delta1 for depth; or accuracy_top1 for classification), and inference time across different formats like ONNX, [OpenVINO](../integrations/openvino.md), and TensorRT. Benchmarking helps you select the optimal export format based on your specific requirements for speed and accuracy in your deployment environment.
 
 [Benchmark Examples](benchmark.md){ .md-button }
 
@@ -106,7 +108,7 @@ For more detailed instructions, you can refer to the [Ultralytics Train Guide](.
 Ultralytics YOLO26 uses various metrics during the validation process to assess model performance. These include:
 
 - **mAP (mean Average Precision)**: This evaluates the accuracy of object detection.
-- **IOU (Intersection over Union)**: Measures the overlap between predicted and ground truth bounding boxes.
+- **IoU (Intersection over Union)**: Measures the overlap between predicted and ground truth bounding boxes.
 - **[Precision](https://www.ultralytics.com/glossary/precision) and [Recall](https://www.ultralytics.com/glossary/recall)**: Precision measures the ratio of true positive detections to the total detected positives, while recall measures the ratio of true positive detections to the total actual positives.
 
 You can run the following command to start the validation:

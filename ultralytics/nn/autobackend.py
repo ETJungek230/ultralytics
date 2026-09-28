@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import platform
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -9,12 +11,15 @@ import numpy as np
 import torch
 from torch import nn
 
+from ultralytics.utils import LINUX, LOGGER, WINDOWS
 from ultralytics.utils.checks import check_suffix
 from ultralytics.utils.downloads import is_url
+from ultralytics.utils.torch_utils import TORCH_1_10, TORCH_1_13, smart_inference_mode
 
 from .backends import (
     AscendBackend,
     AxeleraBackend,
+    CoreAIBackend,
     CoreMLBackend,
     DeepXBackend,
     ExecuTorchBackend,
@@ -69,11 +74,12 @@ def check_class_names(names: list | dict) -> dict[int, str]:
     return names
 
 
-def default_class_names(data: str | Path | None = None) -> dict[int, str]:
+def default_class_names(data: str | Path | None = None, nc: int = 999) -> dict[int, str]:
     """Load class names from a YAML file or return numerical class names.
 
     Args:
         data (str | Path, optional): Path to YAML file containing class names.
+        nc (int): Number of names to generate when the YAML is missing or unreadable.
 
     Returns:
         (dict): Dictionary mapping class indices to class names.
@@ -86,7 +92,7 @@ def default_class_names(data: str | Path | None = None) -> dict[int, str]:
             return YAML.load(check_yaml(data))["names"]
         except Exception:
             pass
-    return {i: f"class{i}" for i in range(999)}  # return default if above errors
+    return {i: f"class{i}" for i in range(nc)}  # return default if above errors
 
 
 class AutoBackend(nn.Module):
@@ -96,38 +102,39 @@ class AutoBackend(nn.Module):
     range of formats, each with specific naming conventions as outlined below:
 
         Supported Formats and Naming Conventions:
-            | Format                | File Suffix       |
-            | --------------------- | ----------------- |
-            | PyTorch               | *.pt              |
-            | TorchScript           | *.torchscript     |
-            | ONNX Runtime          | *.onnx            |
-            | ONNX OpenCV DNN       | *.onnx (dnn=True) |
-            | OpenVINO              | *openvino_model/  |
-            | CoreML                | *.mlpackage       |
-            | TensorRT              | *.engine          |
-            | TensorFlow SavedModel | *_saved_model/    |
-            | TensorFlow GraphDef   | *.pb              |
-            | TensorFlow Edge TPU   | *_edgetpu.tflite  |
-            | PaddlePaddle          | *_paddle_model/   |
-            | MNN                   | *.mnn             |
-            | NCNN                  | *_ncnn_model/     |
-            | IMX                   | *_imx_model/      |
-            | RKNN                  | *_rknn_model/     |
-            | Triton Inference      | triton://model    |
-            | ExecuTorch            | *.pte             |
-            | Axelera AI            | *_axelera_model/  |
-            | DEEPX                 | *_deepx_model/    |
-            | Qualcomm QNN          | *_qnn.onnx        |
-            | LiteRT                | *.tflite          |
-            | Hailo                 | *_hailo_model/    |
-            | Huawei Ascend         | *_ascend_model/   |
+            | Format                | File Suffix            |
+            | --------------------- | ---------------------- |
+            | PyTorch               | *.pt                   |
+            | TorchScript           | *.torchscript          |
+            | ONNX Runtime          | *.onnx                 |
+            | ONNX OpenCV DNN       | *.onnx (dnn=True)      |
+            | OpenVINO              | *_openvino_model/      |
+            | CoreML                | *.mlpackage            |
+            | Core AI               | *.aimodel              |
+            | TensorRT              | *.engine               |
+            | TensorFlow SavedModel | *_saved_model/         |
+            | TensorFlow GraphDef   | *.pb                   |
+            | TensorFlow Edge TPU   | *_edgetpu.tflite       |
+            | LiteRT                | *.tflite               |
+            | PaddlePaddle          | *_paddle_model/        |
+            | MNN                   | *.mnn                  |
+            | NCNN                  | *_ncnn_model/          |
+            | IMX                   | *_imx_model/           |
+            | RKNN                  | *_rknn_model/          |
+            | Triton Inference      | http:// or grpc:// URL |
+            | ExecuTorch            | *_executorch_model/    |
+            | Axelera AI            | *_axelera_model/       |
+            | DEEPX                 | *_deepx_model/         |
+            | Qualcomm QNN          | *_qnn.onnx             |
+            | Hailo                 | *_hailo_model/         |
+            | Huawei Ascend         | *_ascend_model/        |
 
     Attributes:
         backend (BaseBackend): The loaded inference backend instance.
         format (str): The model format (e.g., 'pt', 'onnx', 'engine').
-        model: The underlying model (nn.Module for PyTorch backends, backend instance otherwise).
+        model: The underlying model, delegated from `backend.model` (nn.Module for PyTorch, runtime object otherwise).
         device (torch.device): The device (CPU or GPU) on which the model is loaded.
-        task (str): The type of task the model performs (detect, segment, semantic, classify, pose, obb).
+        task (str): The type of task the model performs (detect, segment, semantic, depth, classify, pose, obb).
         names (dict): A dictionary of class names that the model can detect.
         stride (int): The model stride, typically 32 for YOLO models.
         fp16 (bool): Whether the model uses half-precision (FP16) inference.
@@ -140,8 +147,9 @@ class AutoBackend(nn.Module):
         _model_type: Determine the model type from file path.
 
     Examples:
-        >>> model = AutoBackend(model="yolo26n.pt", device="cuda")
-        >>> results = model(img)
+        >>> import torch
+        >>> model = AutoBackend(model="yolo26n.pt", device=torch.device("cpu"))
+        >>> preds = model(torch.zeros(1, 3, 640, 640))
     """
 
     _BACKEND_MAP = {
@@ -152,9 +160,11 @@ class AutoBackend(nn.Module):
         "openvino": OpenVINOBackend,
         "engine": TensorRTBackend,
         "coreml": CoreMLBackend,
+        "coreai": CoreAIBackend,
         "saved_model": TensorFlowBackend,
         "pb": TensorFlowBackend,
         "edgetpu": TensorFlowBackend,
+        "litert": LiteRTBackend,
         "paddle": PaddleBackend,
         "mnn": MNNBackend,
         "ncnn": NCNNBackend,
@@ -165,40 +175,50 @@ class AutoBackend(nn.Module):
         "axelera": AxeleraBackend,
         "deepx": DeepXBackend,
         "qnn": QNNBackend,
-        "litert": LiteRTBackend,
         "hailo": HailoBackend,
         "ascend": AscendBackend,
     }
 
-    @torch.no_grad()
+    @smart_inference_mode(False)
     def __init__(
         self,
-        model: str | torch.nn.Module = "yolo26n.pt",
-        device: torch.device | None = None,
+        model: str | Path | torch.nn.Module = "yolo26n.pt",
+        device: torch.device | str | None = None,
         dnn: bool = False,
         data: str | Path | None = None,
         fp16: bool = False,
         fuse: bool = True,
         verbose: bool = True,
+        channels_last: bool | None = None,
+        end2end: bool | None = None,
     ):
         """Initialize the AutoBackend for inference.
 
         Args:
-            model (str | torch.nn.Module): Path to the model weights file or a module instance.
-            device (torch.device): Device to run the model on.
+            model (str | Path | torch.nn.Module): Path to the model weights file or a module instance.
+            device (torch.device | str, optional): Device to run the model on, or a 'tpu', 'intel' or 'vulkan' device
+                string from `select_device`. Defaults to CPU when None.
             dnn (bool): Use OpenCV DNN module for ONNX inference.
             data (str | Path, optional): Path to the additional data.yaml file containing class names.
             fp16 (bool): Enable half-precision inference. Supported only on specific backends.
             fuse (bool): Fuse Conv2D + BatchNorm layers for optimization.
             verbose (bool): Enable verbose logging.
+            channels_last (bool, optional): Use channels-last memory format, or auto-enable it on supported x86 CPUs.
+            end2end (bool, optional): Select the native detection head before fusion; None preserves its current mode.
         """
         super().__init__()
         device = device or torch.device("cpu")
         # Determine model format from path/URL
         format = "pt" if isinstance(model, nn.Module) else self._model_type(model, dnn)
+        if (
+            isinstance(model, nn.Module)
+            and TORCH_1_10
+            and any(x.is_inference() for x in (*model.parameters(), *model.buffers()))
+        ):
+            model = deepcopy(model)  # retained backends require normal tensors for fusion and later mutation
 
         # Check if format supports FP16
-        fp16 &= format in {"pt", "torchscript", "onnx", "openvino", "engine", "triton"}
+        fp16 &= format in {"pt", "torchscript", "onnx", "openvino", "engine"}
 
         # Set device
         if (
@@ -223,9 +243,29 @@ class AutoBackend(nn.Module):
         if format == "pt":
             backend_kwargs["fuse"] = fuse
             backend_kwargs["verbose"] = verbose
+            backend_kwargs["end2end"] = end2end
         elif format in {"saved_model", "pb", "edgetpu", "dnn"}:
             backend_kwargs["format"] = format
         self.backend = self._BACKEND_MAP[format](model, **backend_kwargs)
+
+        if format == "pt":
+            device_type = torch.device(self.backend.device).type
+            supported = device_type == "cuda" or (
+                TORCH_1_13
+                and device_type == "cpu"
+                and platform.machine() in {"AMD64", "x86_64"}
+                and torch.backends.mkldnn.is_available()
+                and torch.backends.mkldnn.enabled
+            )
+            if channels_last is None:
+                channels_last = device_type == "cpu" and supported and (LINUX or WINDOWS)
+            if channels_last and not supported:
+                LOGGER.warning(f"'channels_last=True' is not supported on '{device_type}', ignoring.")
+            self.backend.model.to(
+                memory_format=torch.channels_last if channels_last and supported else torch.contiguous_format
+            )
+        elif channels_last:
+            LOGGER.warning(f"'channels_last=True' applies only to native PyTorch models, ignoring format='{format}'.")
 
         self.nhwc = format in {"coreml", "saved_model", "pb", "edgetpu", "rknn"}
         self.format = format
@@ -234,6 +274,9 @@ class AutoBackend(nn.Module):
         if not self.backend.names:
             self.backend.names = default_class_names(data)
         self.backend.names = check_class_names(self.backend.names)
+        empty = [k for k, v in self.backend.names.items() if not v.strip()]
+        if empty:
+            LOGGER.warning(f"Empty class name string(s) at class indices {empty} will display as blank labels.")
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to the backend.
@@ -242,10 +285,10 @@ class AutoBackend(nn.Module):
         without explicit copying.
 
         Args:
-            name: Attribute name to look up.
+            name (str): Attribute name to look up.
 
         Returns:
-            The attribute value from the backend.
+            (Any): The attribute value from the backend.
 
         Raises:
             AttributeError: If the attribute is not found in backend.
@@ -265,9 +308,9 @@ class AutoBackend(nn.Module):
 
         Args:
             im (torch.Tensor): The image tensor to perform inference on.
-            augment (bool): Whether to perform data augmentation during inference.
-            embed (list, optional): A list of layer indices to return embeddings from.
-            **kwargs (Any): Additional keyword arguments for model configuration.
+            augment (bool): Whether to apply test-time augmentation (native PyTorch models only).
+            embed (list, optional): A list of layer indices to return embeddings from (native PyTorch models only).
+            **kwargs (Any): Additional keyword arguments passed to native PyTorch models; ignored by other formats.
 
         Returns:
             (Any): The raw model output, with NumPy arrays converted to tensors on `self.device`.
@@ -301,7 +344,8 @@ class AutoBackend(nn.Module):
         Returns:
             (Any): Tensor on `self.device`, or the unchanged non-tensor output.
         """
-        x = torch.tensor(x) if isinstance(x, np.ndarray) else x
+        if isinstance(x, np.ndarray):
+            return torch.as_tensor(x, device=self.device)  # shares memory on CPU, one fused copy to accelerators
         return x.to(self.device) if isinstance(x, torch.Tensor) else x
 
     def warmup(self, imgsz: tuple[int, int, int, int] = (1, 3, 640, 640), im: torch.Tensor | None = None) -> None:
@@ -330,11 +374,11 @@ class AutoBackend(nn.Module):
                 non_max_suppression(warmup_boxes)  # warmup NMS
 
     @staticmethod
-    def _model_type(p: str = "path/to/model.pt", dnn: bool = False) -> str:
+    def _model_type(p: str | Path = "path/to/model.pt", dnn: bool = False) -> str:
         """Take a path to a model file and return the model format string.
 
         Args:
-            p (str): Path to the model file.
+            p (str | Path): Path to the model file or Triton URL.
             dnn (bool): Whether to use OpenCV DNN module for ONNX inference.
 
         Returns:

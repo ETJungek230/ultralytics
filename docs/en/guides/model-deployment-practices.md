@@ -1,7 +1,7 @@
 ---
 title: YOLO26 Model Deployment Best Practices
 comments: true
-description: Best practices for deploying YOLO26: choose cloud, edge, or local environments, optimize with pruning and quantization, and secure your deployed models.
+description: "Best practices for deploying YOLO26: choose cloud, edge, or local environments, optimize with pruning and quantization, and secure your deployed models."
 keywords: YOLO26, model deployment, best practices, edge deployment, cloud deployment, quantization, pruning, Docker, model security
 ---
 
@@ -161,7 +161,7 @@ It's essential to control who can access your model and its data to prevent unau
 
 ### Model Obfuscation
 
-Protecting your model from being reverse-engineered or misuse can be done through model obfuscation. It involves encrypting model parameters, such as weights and biases in [neural networks](https://www.ultralytics.com/glossary/neural-network-nn), to make it difficult for unauthorized individuals to understand or alter the model. You can also obfuscate the model's architecture by renaming layers and parameters or adding dummy layers, making it harder for attackers to reverse-engineer it. You can also serve the model in a secure environment, like a secure enclave or using a trusted execution environment (TEE), can provide an extra layer of protection during inference.
+Protecting your model from being reverse-engineered or misused can be done through model obfuscation. It involves encrypting model parameters, such as weights and biases in [neural networks](https://www.ultralytics.com/glossary/neural-network-nn), to make it difficult for unauthorized individuals to understand or alter the model. You can also obfuscate the model's architecture by renaming layers and parameters or adding dummy layers, making it harder for attackers to reverse-engineer it. Serving the model in a secure environment, like a secure enclave or a trusted execution environment (TEE), can also provide an extra layer of protection during inference.
 
 ## Conclusion and Next Steps
 

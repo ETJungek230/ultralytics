@@ -2,38 +2,38 @@
 plans: [free, pro, enterprise]
 title: Deployment Monitoring
 comments: true
-description: Monitor deployed YOLO models on Ultralytics Platform with real-time metrics, request logs, and performance dashboards.
+description: Monitor deployed YOLO models with live prediction statistics, temporary examples, dataset saving, endpoint metrics, and logs on Ultralytics Platform.
 keywords: Ultralytics Platform, monitoring, metrics, logs, deployment, performance, YOLO, observability
 ---
 
 # Monitoring
 
-[Ultralytics Platform](https://platform.ultralytics.com) provides [monitoring for deployed endpoints](../../guides/model-monitoring-and-maintenance.md). Track request metrics, view logs, and check health status with automatic polling.
+[Ultralytics Platform](https://platform.ultralytics.com) provides [monitoring for deployed endpoints](../../guides/model-monitoring-and-maintenance.md). Track endpoint requests, latency, errors, and logs. Ready dedicated endpoints on a current runtime also provide live prediction statistics and temporary examples that you can inspect and save to datasets.
 
-![Ultralytics Platform Deploy Page Overview Cards And World Map](https://cdn.ul.run/i/39e125429eb799c95eb006398e8ab6a4.avif)<!-- screenshot -->
+![Ultralytics Platform Deployments Tab Overview Cards And World Map](https://cdn.ul.run/i/f13ad8c9a1b981b5b3863a9ba602b345.avif)<!-- screenshot -->
 
-## Deployments Dashboard
+## Deployments Tab
 
-The `Deploy` page in the sidebar serves as the monitoring dashboard for all your deployments. It combines the world map, overview metrics, and deployment management in one view. See [Dedicated Endpoints](endpoints.md) for creating and managing deployments.
+The **Deployments** tab on your profile serves as the monitoring dashboard for all your deployments. It combines the world map, overview metrics, and deployment management in one view. See [Dedicated Endpoints](endpoints.md) for creating and managing deployments.
 
 ```mermaid
 graph TB
-    subgraph Dashboard
+    subgraph "Deployments Tab"
         Map[World Map]:::proc --- Cards[Overview Cards]:::proc
         Cards --- List[Deployments List]:::decide
     end
-    subgraph "Per Ready Deployment"
-        Metrics[Metrics Row]:::out
-        Health[Health Check]:::out
-        Logs[Logs Tab]:::out
-        Code[Code Tab]:::out
+    subgraph "Deployment Page"
+        Metrics[Metrics Cards]:::out
+        Overview[Overview Tab: Endpoint and Health Check]:::out
+        Monitoring[Monitoring Tab]:::out
         Predict[Predict Tab]:::out
+        Logs[Logs Tab]:::out
     end
     List --> Metrics
-    List --> Health
-    List --> Logs
-    List --> Code
+    List --> Overview
+    List --> Monitoring
     List --> Predict
+    List --> Logs
 
     classDef proc fill:#2196F3,color:#fff
     classDef decide fill:#FF9800,color:#fff
@@ -44,14 +44,14 @@ graph TB
 
 Four summary cards at the top of the page show:
 
-![Ultralytics Platform Deploy Page Four Overview Cards](https://cdn.ul.run/i/4ee4595697397d7ffc102fed995168c1.avif)<!-- screenshot -->
+![Ultralytics Platform Deployments Tab Four Overview Cards](https://cdn.ul.run/i/b315ed2fb56e0d934b78014fb46030e1.avif)<!-- screenshot -->
 
-| Metric                   | Description                                                             |
-| ------------------------ | ----------------------------------------------------------------------- |
-| **Total Requests (24h)** | Requests across all endpoints                                           |
-| **Active Deployments**   | Endpoints currently in the **Ready** state                              |
-| **Error Rate (24h)**     | Share of responses with a 4xx or 5xx status, weighted by request volume |
-| **P95 Latency (24h)**    | Average of the hourly 95th-percentile latencies, weighted by volume     |
+| Metric                     | Description                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------------- |
+| **Active Deployments**     | Endpoints currently in the **Ready** state                                            |
+| **HTTP Requests (24h)**    | HTTP requests across endpoints, including prediction, monitoring, and health requests |
+| **HTTP Error Rate (24h)**  | Share of responses with a 4xx or 5xx status, weighted by request volume               |
+| **HTTP P95 Latency (24h)** | Average of the hourly 95th-percentile latencies, weighted by volume                   |
 
 P95 rather than median latency is reported because health checks return in a couple of milliseconds and would otherwise
 dominate the picture of real inference latency.
@@ -71,41 +71,41 @@ The interactive world map shows:
 
 Click any region to open the `New Deployment` dialog. The map is hidden on small screens.
 
-![Ultralytics Platform Deploy Page World Map With Deployed Regions](https://cdn.ul.run/i/af47d4f67a807072155765ce3861a9c4.avif)<!-- screenshot -->
+![Ultralytics Platform Deployments Tab World Map With Deployed Regions](https://cdn.ul.run/i/a52b2daa4483953d8aa9877af53ee6a8.avif)<!-- screenshot -->
 
 ### Deployments List
 
 Below the overview cards, the deployments list shows all endpoints across your projects. Use the view mode toggle to switch between:
 
-| View        | Description                                                                  |
-| ----------- | ---------------------------------------------------------------------------- |
-| **Cards**   | Full detail cards with metrics, logs, code, and predict tabs                 |
-| **Compact** | Grid of smaller cards (1-4 columns) with key metrics                         |
-| **Table**   | DataTable with sortable columns: Name, Region, Status, Requests, P95, Errors |
+| View        | Description                                                                        |
+| ----------- | ---------------------------------------------------------------------------------- |
+| **Cards**   | Cards with status, size, metrics, distance, and deployed date                      |
+| **Compact** | Grid of smaller cards (1-4 columns) with key metrics                               |
+| **Table**   | DataTable with sortable columns, including CPU, Memory, HTTP metrics, and Distance |
 
 !!! tip "Real-Time Updates"
 
-    The dashboard refreshes automatically, updating faster while deployments are in a transitional state (`creating`, `deploying`, or `stopping`). Click the refresh button for immediate updates.
+    The tab refreshes automatically, and faster while a deployment is changing state (`creating`, `deploying`, or `stopping`). Each card and row links to the deployment page.
 
 ## Per-Deployment Metrics
 
-Each deployment card (in cards view) shows real-time metrics. The metrics row, health check, and the `Logs`, `Code`, and `Predict` tabs described below appear only while the deployment is **Ready**:
+Each deployment page shows real-time metrics above its `Overview`, `Monitoring`, `Predict`, and `Logs` tabs:
 
-### Metrics Row
+### Metrics Cards
 
-| Metric          | Description                                             |
-| --------------- | ------------------------------------------------------- |
-| **Requests**    | Request count over the last 24 hours                    |
-| **P95 Latency** | Average of hourly 95th-percentile latencies (24h)       |
-| **Error Rate**  | Share of 4xx and 5xx responses, shown only when above 0 |
+| Metric                     | Description                                                          |
+| -------------------------- | -------------------------------------------------------------------- |
+| **HTTP Requests (24h)**    | Request count, including prediction, monitoring, and health requests |
+| **HTTP Error Rate (24h)**  | Share of 4xx and 5xx responses                                       |
+| **HTTP P95 Latency (24h)** | Average of hourly 95th-percentile latencies                          |
 
-Metrics refresh automatically. Endpoints that have not
-served a request show "No traffic yet", and metrics are collected only for deployments in the **Ready** state. On the
-deployments dashboard, metrics are fetched for the 20 most recent deployments.
+Each card shows a sparkline and refreshes automatically, next to a card linking to the deployed model. Metrics are
+collected only for deployments in the **Ready** state. On the Deployments tab, metrics are fetched for the 20 most
+recent deployments.
 
 ### Health Check
 
-Running deployments show a health check indicator:
+The **Endpoint** card on a running deployment's `Overview` tab shows a health check indicator:
 
 | Indicator         | Meaning                          |
 | ----------------- | -------------------------------- |
@@ -113,20 +113,92 @@ Running deployments show a health check indicator:
 | **Red heart**     | Unhealthy — shows error message  |
 | **Spinning icon** | Health check in progress         |
 
-Health checks auto-retry while unhealthy and stop once the endpoint responds. Click the
-refresh icon to manually trigger a health check, which doubles as a way to warm a scaled-to-zero endpoint before
+Health checks auto-retry while unhealthy and stop once the endpoint responds. Opening the deployment page runs a
+health check, and the re-ping button triggers another one, which doubles as a way to warm a scaled-to-zero endpoint before
 sending traffic.
 
-![Ultralytics Platform Deployment Card Health Check Healthy With Latency](https://cdn.ul.run/i/c1c2da5731737f6afbd70b12eb144f9f.avif)<!-- screenshot -->
+![Ultralytics Platform Deployment Card Health Check Healthy With Latency](https://cdn.ul.run/i/20d4da9bf7a27469cdf9d93a85530034.avif)<!-- screenshot -->
+
 !!! info "Cold Start Tolerance"
 
-    Platform gives the health check extra time and retries transient connection failures, so a scale-to-zero endpoint has time to start. If the card reports "Service starting up...", refresh it to pick up an instance that finished booting in the meantime.
+    Platform gives the health check extra time and retries transient connection failures, so a scale-to-zero endpoint has time to start. Until the first health check answers, the badge reads **Starting** and the `Predict` and `Monitoring` tabs show **Endpoint is starting**, updating automatically once the endpoint responds. If the check fails, the badge reads **Not responding** and those tabs offer **Retry**.
+
+## Monitoring Tab
+
+Open the deployment page of a **Ready** dedicated endpoint and select the **Monitoring** tab. Send an image through its **Predict** tab or endpoint API to populate **Temporary Examples** and **Prediction Statistics**. Before the first processed image, the tab shows **No images processed**.
+
+!!! note "Endpoint Eligibility"
+
+    Monitoring is available on every **Ready** dedicated endpoint, including default-size endpoints on the Free plan. Existing endpoints are not automatically updated with every runtime release, so an older endpoint may show **Monitoring unavailable** until its runtime is updated.
+
+![Ultralytics Platform Deployment Monitoring Temporary Examples And Statistics](https://cdn.ul.run/i/a3d9495d8a8fdc14eacafe2dc631b3ba.avif)<!-- screenshot -->
+
+!!! warning "Temporary Data"
+
+    Monitoring is lightweight and temporary: charts, prediction statistics, and example images live only in the serving instance's memory. They can be lost when the endpoint shuts down, stops, restarts, redeploys, changes resources, or replaces its model. History is not restored when the endpoint starts again. Save useful examples to a dataset and wait for ingestion to finish before changing the endpoint.
+
+### Temporary Examples
+
+The gallery contains recent processed images with prediction overlays. Open an image to inspect its predictions in the full-screen viewer and use the visibility controls to adjust the overlays. The gallery initially shows up to 12 examples; **Show all** expands it.
+
+- **Capture:** Recent processed images appear as temporary examples, at most one per second. Capture is best effort; inference does not wait for example encoding.
+- **Capacity:** At most 100 images within a shared 100 MiB memory budget for compressed images, prediction metadata, and associated assets. The interface labels this budget as **100 MB**.
+- **Replacement:** Older examples are replaced when either limit is reached. An example may become unavailable while you are viewing it.
+- **Storage:** Temporary examples remain in endpoint memory. Saving them to a dataset uses normal workspace storage and processing limits.
+
+![Ultralytics Platform Deployment Monitoring Prediction Viewer](https://cdn.ul.run/i/b701a3d589f966da4f00b3693c6ea030.avif)<!-- screenshot -->
+
+### Save Examples to a Dataset
+
+Workspace members with content editing permission can save examples to a dataset in the endpoint's workspace:
+
+1. Select individual examples using their checkboxes, or click **Select all**.
+2. Click **Save to dataset**.
+3. Choose an existing dataset with the same task as the deployed model. Connected-source datasets are excluded; create a compatible dataset first if none is available.
+4. Click the **Save** button, which shows the selected image count, then open the dataset to follow processing.
+
+Selected images and predictions are copied through the standard dataset upload and ingestion workflow. Normal quota, class mapping, and duplicate handling apply. Saving leaves the temporary examples in the gallery; successfully ingested dataset images survive endpoint restarts and deletion. Review predicted labels before using them for training.
+
+![Ultralytics Platform Deployment Monitoring Save Examples To Dataset](https://cdn.ul.run/i/18c1c9cd8decb4e3c115d6e02fdf49fe.avif)<!-- screenshot -->
+
+To remove temporary examples, use an image's hover trash control or select examples and click the bulk trash button, then confirm **Delete**. Deleting examples leaves aggregate prediction statistics and images already saved to datasets unchanged.
+
+### Prediction Statistics
+
+Statistics aggregate processed images independently of the gallery. Deleting or replacing an example does not subtract its contribution. The summary shows images, predictions, and images without predictions for the selected period; depth models show image counts.
+
+The date picker defaults to the last **30 days** and accepts ranges up to **365 days**. Selected dates use **UTC** boundaries; chart timestamps display in local time. Recent ranges of up to three days use hourly history when the full range falls within the last 72 hours; other ranges use daily history. The date range filters statistics, while the gallery continues to show the current temporary examples.
+
+History is bounded to **72 hourly buckets** and **365 daily buckets**, and is available only since the current instance started. A selected period with no processed images shows **No images processed in this period**.
+
+Available charts depend on the task and collected predictions:
+
+| Chart                     | What it shows                                                                                                   |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| **Predictions over Time** | Processed image and prediction totals; depth models show **Images over Time**                                   |
+| **Inference Time**        | Mean model inference time in milliseconds, excluding network and request overhead                               |
+| **Top Classes**           | Prediction counts by class                                                                                      |
+| **Predictions per Image** | Distribution including images with no predictions and a final **100+** bin; hidden for classification and depth |
+| **Prediction Confidence** | Confidence distribution and mean, when confidence scores are available                                          |
+| **Confidence over Time**  | Mean prediction confidence for each time bucket                                                                 |
+| **Prediction Dimensions** | Prediction width and height relative to the input image, when box dimensions are available                      |
+| **Prediction Locations**  | Spatial heatmap of predictions, when location data is available                                                 |
+
+![Ultralytics Platform Deployment Monitoring Prediction Statistics](https://cdn.ul.run/i/cb3decac9b9a31e4f7d3d1cb6377e7f3.avif)<!-- screenshot -->
+
+![Ultralytics Platform Deployment Monitoring Confidence And Spatial Statistics](https://cdn.ul.run/i/f9cb24a8692f568f96617c6026c90b8e.avif)<!-- screenshot -->
+
+!!! tip "Interpreting Statistics"
+
+    Confidence measures the model's certainty, not correctness. Inspect examples and compare against reviewed labels when assessing accuracy. **Inference Time** measures model execution; the deployment's **P95 Latency** includes request handling and can also reflect non-inference traffic such as health checks.
+
+Monitoring refreshes automatically while its panel is open and visible, and pauses when the panel is offscreen or the browser tab is hidden. Successful inference through the deployment's **Predict** tab also triggers a statistics refresh.
 
 ## Logs
 
-Each deployment card includes a `Logs` tab for viewing recent log entries:
+Each deployment page includes a `Logs` tab for viewing recent log entries:
 
-![Ultralytics Platform Deployment Card Logs Tab With Severity Filter](https://cdn.ul.run/i/f7b9acee12aab29e7b05f1f77d44d65e.avif)<!-- screenshot -->
+![Ultralytics Platform Deployment Card Logs Tab With Severity Filter](https://cdn.ul.run/i/87447dfe15d51c112e12956a72f5fd06.avif)<!-- screenshot -->
 
 ### Log Entries
 
@@ -143,13 +215,13 @@ Each log entry shows:
 
     Each entry carries a color-coded severity bar:
 
-    | Level        | Color  | Description         |
-    | ------------ | ------ | ------------------- |
-    | **DEBUG**    | Gray   | Debug messages      |
-    | **INFO**     | Blue   | Normal requests     |
-    | **WARNING**  | Amber  | Non-critical issues |
-    | **ERROR**    | Red    | Failed requests     |
-    | **CRITICAL** | Red    | Critical failures   |
+    | Level        | Color | Description         |
+    | ------------ | ----- | ------------------- |
+    | **DEBUG**    | Gray  | Debug messages      |
+    | **INFO**     | Blue  | Normal requests     |
+    | **WARNING**  | Amber | Non-critical issues |
+    | **ERROR**    | Red   | Failed requests     |
+    | **CRITICAL** | Red   | Critical failures   |
 
     The API accepts the full set of log severities as a comma-separated filter: `DEBUG`, `INFO`, `NOTICE`, `WARNING`, `ERROR`, `CRITICAL`, `ALERT`, and `EMERGENCY`.
 
@@ -171,8 +243,8 @@ returns a `nextPageToken` for paging further back.
 
 ## Code Examples
 
-Each deployment card includes a `Code` tab showing ready-to-use API code with the endpoint URL filled in. For workspace
-owners, the deployment's bound API key is inserted, ready to copy and run. Non-owners see a `YOUR_API_KEY`
+The **Docs** result tab in each deployment's `Predict` tab shows ready-to-use API code with the endpoint URL and, for
+workspace owners, the deployment's bound API key filled in, ready to copy and run. Non-owners see a `YOUR_API_KEY`
 placeholder:
 
 === "Python"
@@ -234,11 +306,11 @@ placeholder:
 
 !!! note "Auto-Populated Credentials"
 
-    When viewing the `Code` tab in the platform, the endpoint URL and, for workspace owners, the deployment's [bound API key](endpoints.md#authentication) are filled in for you. See [API Keys](../account/api-keys.md) to generate a key.
+    In the deployment's `Predict` tab **Docs** examples, the endpoint URL and, for workspace owners, the deployment's [bound API key](endpoints.md#authentication) are filled in for you. See [API Keys](../account/api-keys.md) to generate a key.
 
 ## Deployment Predict
 
-The `Predict` tab on each deployment card provides an inline predict panel — the same interface as the model's `Predict` tab, but running inference through the deployment endpoint instead of the shared service. This is useful for testing a deployed endpoint directly from the browser. See [Inference](inference.md) for parameter details and response formats.
+The `Predict` tab on each deployment page provides an inline predict panel — the same interface as the model's `Predict` tab, but running inference through the deployment endpoint instead of the shared service. This is useful for testing a deployed endpoint directly from the browser. See [Inference](inference.md) for parameter details and response formats.
 
 ## API Endpoints
 
@@ -261,9 +333,12 @@ utilization, and instance count.
 | ----------- | ------ | ---------------------------------------------------------------- |
 | `range`     | string | Time range: `1h`, `6h`, `24h`, `7d`, or `30d` (default `24h`)    |
 | `sparkline` | bool   | Return the compact dashboard summary instead of the full payload |
+| `view`      | string | `overview` returns only request, error, and P95 latency metrics  |
 
-With `sparkline=true`, the response is the compact form the deployment cards use — 24 hourly request counts plus total
-requests, error rate, and average latency. This is the call that refreshes every 60 seconds.
+With `sparkline=true`, the response is a compact summary — 24 hourly request counts plus total requests, error rate, and
+average latency. With `view=overview`, `summary` holds `totalRequests`, `errorRate`, and `p95LatencyMs`, and
+`timeSeries` holds `requests`, `errors`, and `latencyP95`; the stat cards on the deployment page use this view and
+refresh automatically.
 
 ### Deployment Logs
 
@@ -303,7 +378,7 @@ An unhealthy response omits `status` when the endpoint could not be reached at a
 
 !!! note "Dashboard Overview"
 
-    The aggregated numbers on the `Deploy` page are not available as a single REST endpoint. Reproduce them by calling the metrics route for each deployment returned by `GET /api/deployments/{owner}` (`client.deployments.list(owner)`).
+    The aggregated numbers on the Deployments tab are not available as a single REST endpoint. Reproduce them by calling the metrics route for each deployment returned by `GET /api/deployments/{owner}` (`client.deployments.list(owner)`).
 
 ## Performance Optimization
 
@@ -345,8 +420,10 @@ Use monitoring data to optimize your deployments:
 
 ### How long is data retained?
 
-The metrics API supports selectable windows from 1 hour through 30 days, sampled more coarsely as the window grows —
-1-minute buckets over 1 hour up to 4-hour buckets over 30 days. The deployment card shows the 20 most recent log
+**Prediction statistics and temporary examples** last only for the serving instance's lifetime, within the bucket and gallery limits described above. Stopping, restarting, redeploying, resizing, or replacing the model can clear them. Only examples successfully saved to a dataset persist independently of the endpoint.
+
+**Operational metrics and logs** have separate history windows. The metrics API supports selectable windows from 1 hour through 30 days, sampled more coarsely as the window grows —
+1-minute buckets over 1 hour up to 4-hour buckets over 30 days. The deployment's `Logs` tab shows the 20 most recent log
 entries; the logs API can return up to 200 entries per request and supports pagination.
 
 Metrics and logs are retained only while the deployment exists, so deleting a deployment also ends access to its history.
@@ -354,9 +431,9 @@ Export anything you need to keep before deleting an endpoint.
 
 ### Can I monitor multiple endpoints together?
 
-Yes, the deployments page shows all endpoints with aggregated overview cards. Use the table view to compare performance across deployments.
+Yes, the **Deployments** tab on your profile shows all endpoints with aggregated overview cards. Use the table view to compare performance across deployments.
 
 ### Do stopped deployments still report metrics?
 
 No. Metrics and health checks are collected only for deployments in the **Ready** state. A stopped endpoint keeps its
-card and history window but shows no live numbers until you start it again.
+deployment page and history window but shows no live numbers until you start it again.

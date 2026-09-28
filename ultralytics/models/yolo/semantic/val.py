@@ -13,7 +13,6 @@ import torch.nn.functional as F
 from PIL import Image
 
 from ultralytics.data.dataset import SemanticDataset
-from ultralytics.data.utils import add_polygon_background
 from ultralytics.models.yolo.detect import DetectionValidator
 from ultralytics.utils import LOGGER, RANK
 from ultralytics.utils.metrics import ConfusionMatrix, SemanticMetrics
@@ -110,7 +109,9 @@ class SemanticSegmentationValidator(DetectionValidator):
         pred_hw = preds.shape[2:]
         if pred_hw[0] != self._semantic_target_shape[0] or pred_hw[1] != self._semantic_target_shape[1]:
             preds = F.interpolate(preds, size=self._semantic_target_shape, mode="bilinear", align_corners=False)
-        return preds.argmax(dim=1).to(torch.int32) if self.nc > 1 else preds.gt(0).squeeze(1).to(torch.int32)
+        if self.nc > 1:  # CPU argmax over a non-innermost dim runs as a per-output loop; max(dim) streams
+            return (preds.max(dim=1).indices if preds.device.type == "cpu" else preds.argmax(dim=1)).to(torch.int32)
+        return preds.gt(0).squeeze(1).to(torch.int32)
 
     def update_metrics(self, preds, batch):
         """Update metrics with predictions and ground truth.
@@ -183,10 +184,6 @@ class SemanticSegmentationValidator(DetectionValidator):
         super().print_results()
         if self.args.save_json and self.results_dir is not None:
             LOGGER.info(f"Semantic prediction masks saved to {self.results_dir}")
-
-    def get_dataset(self):
-        """Parse the dataset YAML and add background metadata for polygon labels when required."""
-        return add_polygon_background(super().get_dataset())
 
     def plot_predictions(self, batch, preds, ni):
         """Plot predicted semantic masks on input images."""

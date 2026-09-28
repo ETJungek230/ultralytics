@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ultralytics.utils import ARM64, LINUX, LOGGER
+from ultralytics.utils import ARM64, LINUX, LOGGER, WINDOWS
 from ultralytics.utils.checks import check_requirements
 
 from .base import BaseBackend
@@ -32,6 +32,8 @@ class OpenVINOBackend(BaseBackend):
         import openvino as ov
 
         core = ov.Core()
+        if WINDOWS:  # Avoid reduced-precision CPU kernel failures without restricting native FP32 instructions
+            core.set_property("CPU", {"INFERENCE_PRECISION_HINT": ov.Type.f32})
         fallback_device = "CPU" if core.available_devices == ["CPU"] else "AUTO"
         device_name = fallback_device
 
@@ -52,18 +54,16 @@ class OpenVINOBackend(BaseBackend):
 
         self.apply_metadata(self.read_metadata(w))
 
-        # OpenVINO CPU plugin segfaults running INT8 models with dynamic shapes on Intel AMX CPUs (Sapphire Rapids and
+        # OpenVINO CPU plugin crashes running INT8 models with dynamic shapes on Intel AMX CPUs (Sapphire Rapids and
         # newer), see https://github.com/openvinotoolkit/openvino/issues/37577, so run those as static models by
         # reshaping and recompiling per input shape in forward() instead
         cpuinfo = Path("/proc/cpuinfo")
         self.read_model = (
             partial(core.read_model, model=str(w), weights=w.with_suffix(".bin"))
-            if LINUX
-            and device_name in {"CPU", "AUTO"}
+            if device_name in {"CPU", "AUTO"}
             and ov_model.input().get_partial_shape().is_dynamic
             and any(op.get_type_name() == "FakeQuantize" for op in ov_model.get_ops())
-            and cpuinfo.exists()
-            and "amx_int8" in cpuinfo.read_text()
+            and (WINDOWS or (LINUX and cpuinfo.exists() and "amx_int8" in cpuinfo.read_text()))
             else None
         )
         if self.read_model is not None:
@@ -71,8 +71,7 @@ class OpenVINOBackend(BaseBackend):
 
         # Force sync inference because AsyncInferQueue can hang indefinitely on Intel and AMD CPUs, see
         # https://github.com/ultralytics/ultralytics/issues/25923.
-        self.inference_mode = "LATENCY"
-        config = {"PERFORMANCE_HINT": self.inference_mode}
+        config = {"PERFORMANCE_HINT": "LATENCY"}
         if LINUX and ARM64 and device_name == "CPU":
             config["EXECUTION_MODE_HINT"] = ov.properties.hint.ExecutionMode.ACCURACY
             config["INFERENCE_PRECISION_HINT"] = ov.Type.f32
@@ -86,10 +85,9 @@ class OpenVINOBackend(BaseBackend):
         self.compile_model = partial(core.compile_model, device_name=device_name, config=config)
         self.ov_compiled_model = self.compile_model(ov_model)
         LOGGER.info(
-            f"Using OpenVINO {self.inference_mode} mode for batch={self.batch} inference on "
+            f"Using OpenVINO LATENCY mode for batch={self.batch} inference on "
             f"{', '.join(self.ov_compiled_model.get_property('EXECUTION_DEVICES'))}..."
         )
-        self.input_name = self.ov_compiled_model.input().get_any_name()
         self.ov = ov
 
     def forward(self, im: torch.Tensor) -> list[np.ndarray]:
@@ -109,25 +107,4 @@ class OpenVINOBackend(BaseBackend):
             ov_model.reshape(list(im.shape))
             self.ov_compiled_model = self.compile_model(ov_model)
 
-        if self.inference_mode in {"THROUGHPUT", "CUMULATIVE_THROUGHPUT"}:
-            # Async inference for larger batch sizes
-            n = im.shape[0]
-            results = [None] * n
-
-            def callback(request, userdata):
-                """Store async inference result in the preallocated results list at the given index."""
-                results[userdata] = request.results
-
-            async_queue = self.ov.AsyncInferQueue(self.ov_compiled_model)
-            async_queue.set_callback(callback)
-
-            for i in range(n):
-                async_queue.start_async(inputs={self.input_name: im[i : i + 1]}, userdata=i)
-            async_queue.wait_all()
-
-            y = [list(r.values()) for r in results]
-            y = [np.concatenate(x) for x in zip(*y)]
-        else:
-            # Sync inference for LATENCY mode
-            y = list(self.ov_compiled_model(im).values())
-        return y
+        return list(self.ov_compiled_model(im).values())

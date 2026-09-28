@@ -40,7 +40,7 @@ class TQDM:
         initial (int): Initial counter value.
         n (int): Current iteration count.
         closed (bool): Whether the progress bar is closed.
-        bar_format (str | None): Custom bar format string.
+        bar_format (str | None): Custom bar format string, kept for API compatibility but not used for formatting.
         file (IO[str]): Output file stream.
 
     Methods:
@@ -106,11 +106,12 @@ class TQDM:
             leave (bool, optional): Whether to leave the progress bar after completion.
             file (IO[str], optional): Output file stream for progress display.
             mininterval (float, optional): Minimum time interval between updates (default 0.1s, 60s in GitHub Actions).
-            disable (bool, optional): Whether to disable the progress bar. Auto-detected if None.
+            disable (bool, optional): Whether to disable the progress bar. If None, disabled when Ultralytics is not
+                verbose or the logger level is above INFO.
             unit (str, optional): String for units of iteration (default "it" for items).
             unit_scale (bool, optional): Auto-scale units for bytes/data units.
             unit_divisor (int, optional): Divisor for unit scaling (default 1000).
-            bar_format (str, optional): Custom bar format string.
+            bar_format (str, optional): Custom bar format string, kept for API compatibility but not used.
             initial (int, optional): Initial counter value.
             **kwargs (Any): Additional keyword arguments for compatibility (ignored).
         """
@@ -209,7 +210,7 @@ class TQDM:
     @staticmethod
     def _fit(text: str, width: int) -> str:
         """Truncate text to width display cells, skipping zero-width ANSI codes and counting CJK chars as 2."""
-        cells = i = 0
+        cells = i = cut = 0
         while i < len(text):
             if text[i] == "\033":  # ANSI escape sequence: zero width, runs through its letter terminator
                 while i < len(text) and not text[i].isalpha():
@@ -217,11 +218,13 @@ class TQDM:
             else:
                 cells += 2 if unicodedata.east_asian_width(text[i]) in "WF" else 1
                 if cells > width:
-                    return f"{text[:i]}\033[0m"  # reset so a truncated color does not bleed
+                    return f"{text[:cut]}…\033[0m"  # reset so a truncated color does not bleed
+                if cells < width:
+                    cut = i + 1  # last cut that still leaves a cell for the ellipsis
             i += 1
         return text
 
-    def _should_update(self, dt: float, dn: int) -> bool:
+    def _should_update(self, dt: float) -> bool:
         """Check if display should update."""
         if self.noninteractive:
             return False
@@ -236,7 +239,7 @@ class TQDM:
         dt = current_time - self.last_print_t
         dn = self.n - self.last_print_n
 
-        if not final and not self._should_update(dt, dn):
+        if not final and not self._should_update(dt):
             return
 
         # Calculate rate (avoid crazy numbers)
@@ -295,12 +298,13 @@ class TQDM:
         # Write to output, fitting real terminals only so redirected logs keep full lines
         try:
             progress_str = f"{self.desc}: {fields}"
-            if self.file.isatty():  # description yields its cells first so the progress fields survive
+            if self.file.isatty() and "JPY_PARENT_PID" not in os.environ:  # a notebook pane scrolls, never fit it
                 try:  # measure self.file's own terminal, not sys.__stdout__
                     width = os.get_terminal_size(self.file.fileno()).columns - 1
                 except Exception:  # streams without a usable fileno (io.StringIO, wrapped stdout)
                     width = shutil.get_terminal_size().columns - 1  # COLUMNS env, else sys.__stdout__
-                progress_str = self._fit(f"{self._fit(self.desc, width - len(fields) - 2)}: {fields}", width)
+                if width > 0:  # a pty opened without a winsize reports 0 columns, so there is no width to fit to
+                    progress_str = self._fit(f"{self._fit(self.desc, width - len(fields) - 2)}: {fields}", width)
             # Non-interactive environments avoid the carriage return which creates empty lines
             frame = progress_str if self.noninteractive else f"\r\033[K{progress_str}"
             if progress := getattr(self.file, "progress", None):

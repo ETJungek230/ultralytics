@@ -64,41 +64,21 @@ Before diving into the usage instructions, be sure to check out the range of [YO
     === "Python"
 
         ```python
-        from clearml import Task
-
         from ultralytics import YOLO
 
-        # Step 1: Creating a ClearML Task
-        task = Task.init(project_name="my_project", task_name="my_yolo26_task")
-
-        # Step 2: Selecting the YOLO26 Model
-        model_variant = "yolo26n"
-        task.set_parameter("model_variant", model_variant)
-
-        # Step 3: Loading the YOLO26 Model
-        model = YOLO(f"{model_variant}.pt")
-
-        # Step 4: Setting Up Training Arguments
-        args = {"data": "coco8.yaml", "epochs": 16}
-        task.connect(args)
-
-        # Step 5: Initiating Model Training
-        results = model.train(**args)
+        # The callback creates and connects the ClearML task automatically
+        model = YOLO("yolo26n.pt")
+        results = model.train(
+            data="coco8.yaml",
+            epochs=16,
+            project="my_project",
+            name="my_yolo26_task",
+        )
         ```
 
 ### Understanding the Code
 
-Let's understand the steps showcased in the usage code snippet above.
-
-**Step 1: Creating a ClearML Task**: A new task is initialized in ClearML, specifying your project and task names. This task will track and manage your model's training.
-
-**Step 2: Selecting the YOLO26 Model**: The `model_variant` variable is set to 'yolo26n', one of the YOLO26 models. This variant is then logged in ClearML for tracking.
-
-**Step 3: Loading the YOLO26 Model**: The selected YOLO26 model is loaded using Ultralytics' YOLO class, preparing it for training.
-
-**Step 4: Setting Up Training Arguments**: Key training arguments like the dataset (`coco8.yaml`) and the number of [epochs](https://www.ultralytics.com/glossary/epoch) (`16`) are organized in a dictionary and connected to the ClearML task. This allows for tracking and potential modification via the ClearML UI. For a detailed understanding of the model training process and best practices, refer to our [YOLO26 Model Training guide](../modes/train.md).
-
-**Step 5: Initiating Model Training**: The model training is started with the specified arguments. The results of the training process are captured in the `results` variable.
+Once ClearML is installed and configured, its callback is enabled by default. It creates a task when training starts, uses the YOLO `project` and `name` arguments for the ClearML project and task names, and connects the training arguments automatically. Run `yolo settings clearml=False` to disable the integration. For training options and best practices, see the [YOLO26 Model Training guide](../modes/train.md).
 
 ### Understanding the Output
 
@@ -176,7 +156,7 @@ ClearML's user-friendly interface allows easy cloning, editing, and enqueuing of
 
 ## Dataset Version Management
 
-ClearML also offers powerful [dataset version management](https://docs.clear.ml/docs/latest/docs/hyperdatasets/dataset/) capabilities that integrate seamlessly with YOLO26 training workflows. This feature allows you to:
+ClearML also offers powerful [dataset version management](https://docs.clear.ml/docs/latest/docs/clearml_data/) capabilities that integrate seamlessly with YOLO26 training workflows. This feature allows you to:
 
 - Version your datasets separately from your code
 - Track which dataset version was used for each experiment
@@ -223,7 +203,7 @@ You then configure ClearML with your credentials from the [ClearML Settings page
 
 ### Why should I use ClearML with Ultralytics YOLO26 for my machine learning projects?
 
-Using ClearML with Ultralytics YOLO26 enhances your machine learning projects by automating experiment tracking, streamlining workflows, and enabling robust model management. ClearML offers real-time metrics tracking, resource utilization monitoring, and a user-friendly interface for comparing experiments. These features help optimize your model's performance and make the development process more efficient. Learn more about the benefits and procedures in our [MLOps Integration guide](../modes/train.md).
+Using ClearML with Ultralytics YOLO26 enhances your machine learning projects by automating experiment tracking, streamlining workflows, and enabling robust model management. ClearML offers real-time metrics tracking, resource utilization monitoring, and a user-friendly interface for comparing experiments. These features help optimize your model's performance and make the development process more efficient. Learn more about the benefits and procedures in our [YOLO26 Model Training guide](../modes/train.md).
 
 ### How do I troubleshoot common issues during YOLO26 and ClearML integration?
 
@@ -231,32 +211,16 @@ If you encounter issues during the integration of YOLO26 with ClearML, consult o
 
 ### How do I set up the ClearML task for YOLO26 model training?
 
-Setting up a ClearML task for YOLO26 training involves initializing a task, selecting the model variant, loading the model, setting up training arguments, and finally, starting the model training. Here's a simplified example:
+After `clearml-init`, start training normally. The callback creates the ClearML task and connects the training arguments automatically:
 
 ```python
-from clearml import Task
-
 from ultralytics import YOLO
 
-# Step 1: Creating a ClearML Task
-task = Task.init(project_name="my_project", task_name="my_yolo26_task")
-
-# Step 2: Selecting the YOLO26 Model
-model_variant = "yolo26n"
-task.set_parameter("model_variant", model_variant)
-
-# Step 3: Loading the YOLO26 Model
-model = YOLO(f"{model_variant}.pt")
-
-# Step 4: Setting Up Training Arguments
-args = {"data": "coco8.yaml", "epochs": 16}
-task.connect(args)
-
-# Step 5: Initiating Model Training
-results = model.train(**args)
+model = YOLO("yolo26n.pt")
+results = model.train(data="coco8.yaml", epochs=16, project="my_project", name="my_yolo26_task")
 ```
 
-Refer to our [Usage guide](#usage) for a detailed breakdown of these steps.
+The YOLO `project` and `name` arguments become the ClearML project and task names. See the [Usage guide](#usage) for details.
 
 ### Where can I view the results of my YOLO26 training in ClearML?
 

@@ -1,5 +1,8 @@
 ---
 comments: true
+license:
+    name: CC-BY-SA-3.0
+    url: https://creativecommons.org/licenses/by-sa/3.0/
 description: Explore the Hypersim depth dataset for monocular depth estimation, a photorealistic synthetic indoor dataset with dense per-pixel ground truth used to train Ultralytics YOLO26-Depth models.
 keywords: Ultralytics, YOLO, depth estimation, Hypersim, synthetic indoor dataset, photorealistic, dense depth, monocular depth
 ---
@@ -73,7 +76,7 @@ There is no standalone held-out Hypersim benchmark in this setup. Instead, the r
 
 ## Dataset YAML
 
-A YAML (Yet Another Markup Language) file is used to define the dataset configuration. It contains information about the dataset's paths, classes, and other relevant information. For Hypersim, the `depth-hypersim.yaml` file defines the paths and the single `depth` class.
+A YAML file is used to define the dataset configuration. It contains information about the dataset's paths, classes, and other relevant information. For Hypersim, the `depth-hypersim.yaml` file defines the paths and the single `depth` class.
 
 !!! example "ultralytics/cfg/datasets/depth-hypersim.yaml"
 
@@ -128,3 +131,17 @@ If you use the Hypersim dataset in your research or development work, please cit
         ```
 
 We would like to acknowledge the creators of Hypersim for making this photorealistic synthetic indoor dataset available to the computer vision community.
+
+## FAQ
+
+### What is the Hypersim dataset and why is it used for depth training?
+
+Hypersim is a photorealistic synthetic indoor dataset from Apple, ray-traced from professional Evermotion 3D interiors. Because every pixel has an exact depth value with no sensor noise or missing returns, its 74,619 images (68,242 train, 6,377 val) supply clean, dense indoor geometry that complements the noisier real-world sensor data in the YOLO26-Depth training mix.
+
+### How do I obtain and convert Hypersim?
+
+Hypersim has no automatic download. Fetch the scenes (~1.9 TB) with the official script from the [ml-hypersim repository](https://github.com/apple/ml-hypersim), then convert the `depth_meters.hdf5` ray distances to planar depth and write millimeter PNGs with the script in [Obtain the Data](#obtain-the-data). Map NaN pixels such as windows and sky to `0` so they are treated as invalid.
+
+### How do I train a YOLO26 depth model on Hypersim?
+
+Run `yolo depth train data=depth-hypersim.yaml model=yolo26n-depth.pt epochs=100 imgsz=640`, or use the Python example in the [Usage](#usage) section. The [Training](../../modes/train.md) page lists every available argument.

@@ -20,7 +20,7 @@ This documentation page is a comprehensive guide to setting up and utilizing the
 
 ## Features
 
-- **Metrics Logging**: Logs metrics at the end of each epoch and at the end of the training.
+- **Metrics Logging**: Logs learning rates, training losses, and validation metrics at the end of each epoch.
 - **Parameter Logging**: Logs all the parameters used in the training.
 - **Artifacts Logging**: Logs model artifacts, including weights and configuration files, at the end of the training.
 
@@ -32,13 +32,14 @@ Ensure MLflow is installed. If not, install it using pip:
 pip install mlflow
 ```
 
-Make sure that MLflow logging is enabled in Ultralytics settings. Usually, this is controlled by the settings `mlflow` key. See the [settings](../quickstart.md#ultralytics-settings) page for more info.
+Make sure that MLflow logging is enabled in Ultralytics settings. Usually, this is controlled by the settings `mlflow` key. See the [settings](../usage/settings.md) page for more info.
 
 !!! example "Update Ultralytics MLflow Settings"
 
     === "Python"
 
         Within the Python environment, call the `update` method on the `settings` object to change your settings:
+
         ```python
         from ultralytics import settings
 
@@ -52,6 +53,7 @@ Make sure that MLflow logging is enabled in Ultralytics settings. Usually, this 
     === "CLI"
 
         If you prefer using the command-line interface, the following commands will allow you to modify your settings:
+
         ```bash
         # Update a setting
         yolo settings mlflow=True
@@ -98,17 +100,11 @@ Make sure that MLflow logging is enabled in Ultralytics settings. Usually, this 
     export MLFLOW_KEEP_RUN_ACTIVE=True
     ```
 
-    The value is parsed case-insensitively; only the string `true` enables this behavior, and any other value (including unset) keeps the default of closing the run. Remember to close it manually afterwards with `mlflow.end_run()`.
-
-5. **Kill MLflow Server Instances**: To stop all running MLflow instances, run:
-
-    ```bash
-    ps aux | grep 'mlflow' | grep -v 'grep' | awk '{print $2}' | xargs kill -9
-    ```
+    The values `1`, `true`, `yes`, `on`, `y`, and `t` enable this behavior (case-insensitive). Any other value, including an unset variable, keeps the default of closing the run. Remember to close it manually afterwards with `mlflow.end_run()`.
 
 ### Logging
 
-The logging is taken care of by the `on_pretrain_routine_end`, `on_fit_epoch_end`, and `on_train_end` [callback functions](../reference/utils/callbacks/mlflow.md). These functions are automatically called during the respective stages of the training process, and they handle the logging of parameters, metrics, and artifacts.
+The logging is taken care of by the `on_pretrain_routine_end`, `on_train_epoch_end`, `on_fit_epoch_end`, and `on_train_end` [callback functions](../reference/utils/callbacks/mlflow.md). These functions are automatically called during the respective stages of the training process, and they handle the logging of parameters, metrics, and artifacts.
 
 ## Examples
 
@@ -140,7 +136,7 @@ To set up MLflow logging with Ultralytics YOLO, you first need to ensure MLflow 
 pip install mlflow
 ```
 
-Next, enable MLflow logging in Ultralytics settings. This can be controlled using the `mlflow` key. For more information, see the [settings guide](../quickstart.md#ultralytics-settings).
+Next, enable MLflow logging in Ultralytics settings. This can be controlled using the `mlflow` key. For more information, see the [settings guide](../usage/settings.md).
 
 !!! example "Update Ultralytics MLflow Settings"
 
@@ -190,7 +186,7 @@ Yes, you can disable MLflow logging for Ultralytics YOLO by updating the setting
 yolo settings mlflow=False
 ```
 
-For further customization and resetting settings, refer to the [settings guide](../quickstart.md#ultralytics-settings).
+For further customization and resetting settings, refer to the [settings guide](../usage/settings.md).
 
 ### How can I start and stop an MLflow server for Ultralytics YOLO tracking?
 
@@ -200,11 +196,7 @@ To start an MLflow server for tracking your experiments in Ultralytics YOLO, use
 mlflow server --backend-store-uri runs/mlflow
 ```
 
-This command starts a local server at `http://127.0.0.1:5000` by default. If you need to stop running MLflow server instances, use the following bash command:
-
-```bash
-ps aux | grep 'mlflow' | grep -v 'grep' | awk '{print $2}' | xargs kill -9
-```
+This command starts a local server at `http://127.0.0.1:5000` by default. Press `Ctrl+C` in that terminal to stop it.
 
 Refer to the [commands section](#commands) for more command options.
 
@@ -216,7 +208,7 @@ Set the `MLFLOW_KEEP_RUN_ACTIVE` environment variable to `True` before training:
 export MLFLOW_KEEP_RUN_ACTIVE=True
 ```
 
-By default this is `False`, so Ultralytics calls `mlflow.end_run()` once training completes. With `MLFLOW_KEEP_RUN_ACTIVE=True` the run stays open so you can log extra metrics, parameters, or artifacts from the same Python session — close it yourself with `mlflow.end_run()` when finished. The value is parsed case-insensitively; only `true` enables this behavior.
+By default this is `False`, so Ultralytics calls `mlflow.end_run()` once training completes. With `MLFLOW_KEEP_RUN_ACTIVE=True` the run stays open so you can log extra metrics, parameters, or artifacts from the same Python session — close it yourself with `mlflow.end_run()` when finished. The values `1`, `true`, `yes`, `on`, `y`, and `t` enable this behavior (case-insensitive).
 
 ### What are the benefits of integrating MLflow with Ultralytics YOLO for experiment tracking?
 

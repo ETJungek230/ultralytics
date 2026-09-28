@@ -272,7 +272,7 @@ class SAM2TwoWayAttentionBlock(TwoWayAttentionBlock):
         norm2 (nn.LayerNorm): Layer normalization after the second attention block.
         mlp (MLP): MLP block for transforming query embeddings.
         norm3 (nn.LayerNorm): Layer normalization after the MLP block.
-        norm4 (nn.LayerNorm): Layer normalization after the third attention block.
+        norm4 (nn.LayerNorm): Layer normalization after the image-to-token attention block.
         cross_attn_image_to_token (Attention): Cross-attention layer from keys to queries.
         skip_first_layer_pe (bool): Flag to skip positional encoding in the first layer.
 
@@ -281,9 +281,9 @@ class SAM2TwoWayAttentionBlock(TwoWayAttentionBlock):
 
     Examples:
         >>> block = SAM2TwoWayAttentionBlock(embedding_dim=256, num_heads=8)
-        >>> sparse_input = torch.randn(1, 100, 256)
-        >>> dense_input = torch.randn(1, 256, 16, 16)
-        >>> sparse_output, dense_output = block(sparse_input, dense_input)
+        >>> queries, query_pe = torch.randn(1, 100, 256), torch.randn(1, 100, 256)
+        >>> keys, key_pe = torch.randn(1, 256, 256), torch.randn(1, 256, 256)
+        >>> queries, keys = block(queries, keys, query_pe, key_pe)
     """
 
     def __init__(
@@ -335,10 +335,11 @@ class SAM2TwoWayTransformer(TwoWayTransformer):
     Examples:
         >>> transformer = SAM2TwoWayTransformer(depth=5, embedding_dim=256, num_heads=8, mlp_dim=2048)
         >>> image_embedding = torch.randn(1, 256, 64, 64)
+        >>> image_pe = torch.randn(1, 256, 64, 64)
         >>> query_embedding = torch.randn(1, 100, 256)
-        >>> output = transformer(image_embedding, query_embedding)
+        >>> output = transformer(image_embedding, image_pe, query_embedding)
         >>> print(output[0].shape, output[1].shape)
-        torch.Size([1, 100, 256]) torch.Size([1, 256, 64, 64])
+        torch.Size([1, 100, 256]) torch.Size([1, 4096, 256])
     """
 
     def __init__(
@@ -454,7 +455,7 @@ class RoPEAttention(Attention):
         return out
 
 
-def do_pool(x: torch.Tensor, pool: nn.Module, norm: nn.Module = None) -> torch.Tensor:
+def do_pool(x: torch.Tensor, pool: nn.Module | None, norm: nn.Module | None = None) -> torch.Tensor:
     """Apply pooling and optional normalization to a tensor, handling spatial dimension permutations."""
     if pool is None:
         return x
@@ -503,7 +504,7 @@ class MultiScaleAttention(nn.Module):
         dim: int,
         dim_out: int,
         num_heads: int,
-        q_pool: nn.Module = None,
+        q_pool: nn.Module | None = None,
     ):
         """Initialize multiscale attention with optional query pooling for efficient feature extraction."""
         super().__init__()
@@ -805,10 +806,6 @@ class PositionEmbeddingRandom(nn.Module):
             scale = 1.0
         self.register_buffer("positional_encoding_gaussian_matrix", scale * torch.randn((2, num_pos_feats)))
 
-        # Set non-deterministic for forward() error 'cumsum_cuda_kernel does not have a deterministic implementation'
-        torch.use_deterministic_algorithms(False)
-        torch.backends.cudnn.deterministic = False
-
     def _pe_encoding(self, coords: torch.Tensor) -> torch.Tensor:
         """Encode normalized [0,1] coordinates using random spatial frequencies."""
         # Assuming coords are in [0, 1]^2 square and have d_1 x ... x d_n x 2 shape
@@ -821,17 +818,10 @@ class PositionEmbeddingRandom(nn.Module):
     def forward(self, size: tuple[int, int]) -> torch.Tensor:
         """Generate positional encoding for a grid using random spatial frequencies."""
         h, w = size
-        grid = torch.ones(
-            (h, w),
-            device=self.positional_encoding_gaussian_matrix.device,
-            dtype=self.positional_encoding_gaussian_matrix.dtype,
-        )
-        y_embed = grid.cumsum(dim=0) - 0.5
-        x_embed = grid.cumsum(dim=1) - 0.5
-        y_embed = y_embed / h
-        x_embed = x_embed / w
-
-        pe = self._pe_encoding(torch.stack([x_embed, y_embed], dim=-1))
+        m = self.positional_encoding_gaussian_matrix
+        y_embed = (torch.arange(h, device=m.device, dtype=m.dtype) + 0.5) / h  # pixel centers
+        x_embed = (torch.arange(w, device=m.device, dtype=m.dtype) + 0.5) / w
+        pe = self._pe_encoding(torch.stack([x_embed[None].expand(h, w), y_embed[:, None].expand(h, w)], dim=-1))
         return pe.permute(2, 0, 1)  # C x H x W
 
     def forward_with_coords(self, coords_input: torch.Tensor, image_size: tuple[int, int]) -> torch.Tensor:
@@ -877,7 +867,6 @@ class Block(nn.Module):
         norm_layer: type[nn.Module] = nn.LayerNorm,
         act_layer: type[nn.Module] = nn.GELU,
         use_rel_pos: bool = False,
-        rel_pos_zero_init: bool = True,
         window_size: int = 0,
         input_size: tuple[int, int] | None = None,
     ) -> None:
@@ -895,7 +884,6 @@ class Block(nn.Module):
             norm_layer (type[nn.Module]): Type of normalization layer to use.
             act_layer (type[nn.Module]): Type of activation function to use in the MLP block.
             use_rel_pos (bool): If True, uses relative positional embeddings in attention.
-            rel_pos_zero_init (bool): If True, initializes relative positional parameters to zero.
             window_size (int): Size of attention window. If 0, uses global attention.
             input_size (tuple[int, int] | None): Input resolution for calculating relative positional parameter size.
         """
@@ -906,7 +894,6 @@ class Block(nn.Module):
             num_heads=num_heads,
             qkv_bias=qkv_bias,
             use_rel_pos=use_rel_pos,
-            rel_pos_zero_init=rel_pos_zero_init,
             input_size=input_size if window_size == 0 else (window_size, window_size),
         )
 
@@ -965,7 +952,6 @@ class REAttention(nn.Module):
         num_heads: int = 8,
         qkv_bias: bool = True,
         use_rel_pos: bool = False,
-        rel_pos_zero_init: bool = True,
         input_size: tuple[int, int] | None = None,
     ) -> None:
         """Initialize a Relative Position Attention module for transformer-based architectures.
@@ -978,7 +964,6 @@ class REAttention(nn.Module):
             num_heads (int): Number of attention heads.
             qkv_bias (bool): If True, adds a learnable bias to query, key, value projections.
             use_rel_pos (bool): If True, uses relative positional encodings.
-            rel_pos_zero_init (bool): If True, initializes relative positional parameters to zero.
             input_size (tuple[int, int] | None): Input resolution for calculating relative positional parameter size.
                 Required if use_rel_pos is True.
         """

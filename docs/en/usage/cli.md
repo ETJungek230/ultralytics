@@ -120,7 +120,7 @@ Train YOLO on the COCO8 dataset for 100 epochs at image size 640. For a full lis
 
 ## Val
 
-Validate the [accuracy](https://www.ultralytics.com/glossary/accuracy) of the trained model on the COCO8 dataset. No arguments are needed as the `model` retains its training `data` and arguments as model attributes.
+Validate the [accuracy](https://www.ultralytics.com/glossary/accuracy) of the trained model on the COCO8 dataset. A custom model reuses its training `data` when `data` is omitted; official weights fall back to the task default `coco8.yaml`.
 
 !!! example
 
@@ -129,7 +129,7 @@ Validate the [accuracy](https://www.ultralytics.com/glossary/accuracy) of the tr
         Validate an official YOLO26n model:
 
         ```bash
-        yolo detect val model=yolo26n.pt
+        yolo detect val model=yolo26n.pt data=coco8.yaml
         ```
 
     === "Custom"
@@ -137,7 +137,7 @@ Validate the [accuracy](https://www.ultralytics.com/glossary/accuracy) of the tr
         Validate a custom-trained model:
 
         ```bash
-        yolo detect val model=path/to/best.pt
+        yolo detect val model=path/to/best.pt data=path/to/data.yaml
         ```
 
 ## Predict
@@ -239,7 +239,7 @@ You can then pass this file as `cfg=default_copy.yaml` along with any additional
 
 ## Solutions Commands
 
-Ultralytics provides ready-to-use solutions for common computer vision applications through the CLI. The `yolo solutions` command exposes object counting, cropping, blurring, workout monitoring, heatmaps, instance segmentation, VisionEye, speed estimation, queue management, analytics, Streamlit inference, and zone-based tracking — see the [Solutions](../solutions/index.md) page for the full catalog. Run `yolo solutions help` to list every supported solution and its arguments.
+Ultralytics provides ready-to-use solutions for common computer vision applications through the CLI. The `yolo solutions` command exposes object counting, cropping, blurring, workout monitoring, heatmaps, instance segmentation, VisionEye, speed estimation, queue management, analytics, Streamlit inference, zone-based tracking, region counting, security alarms, and parking management — see the [Solutions](../solutions/index.md) page for the full catalog. Run `yolo solutions help` to list every supported solution and its arguments.
 
 !!! example
 
