@@ -5,14 +5,15 @@
 
 name: CLA
 on:
-  issue_comment:
-    types:
-      - created
-  pull_request_target:
-    types:
-      - reopened
-      - opened
-      - synchronize
+#  issue_comment:
+#    types:
+#      - created
+#  pull_request_target:
+#    types:
+#      - reopened
+#      - opened
+#      - synchronize
+  workflow_dispatch: # Allow manual triggering
 
 permissions:
   contents: read

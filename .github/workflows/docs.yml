@@ -16,9 +16,9 @@
 name: Publish Docs
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+#  push:
+#    branches: [main]
+#  pull_request:
   workflow_dispatch:
     inputs:
       publish_docs:

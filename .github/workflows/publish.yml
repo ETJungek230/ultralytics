@@ -5,8 +5,8 @@
 name: Publish to PyPI
 
 on:
-  push:
-    branches: [main]
+#  push:
+#    branches: [main]
   workflow_dispatch:
     inputs:
       pypi:

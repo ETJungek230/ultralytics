@@ -6,12 +6,13 @@
 name: Ultralytics Actions
 
 on:
-  issues:
-    types: [opened, edited]
-  discussion:
-    types: [created]
-  pull_request:
-    types: [opened, closed, synchronize, review_requested]
+#  issues:
+#    types: [opened, edited]
+#  discussion:
+#    types: [created]
+#  pull_request:
+#    types: [opened, closed, synchronize, review_requested]
+  workflow_dispatch: # Allow manual triggering
 
 permissions:
   contents: write # Modify code in PRs
