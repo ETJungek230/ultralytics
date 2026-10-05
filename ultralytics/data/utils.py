@@ -10,6 +10,7 @@ import zipfile
 from pathlib import Path
 from tarfile import is_tarfile
 from typing import Any
+from uuid import uuid4
 
 import cv2
 import numpy as np
@@ -210,7 +211,8 @@ def check_file_speeds(
         avg_speed = float("inf")
         speed_msg = ""
 
-    if avg_ping < threshold_ms and avg_speed > threshold_mb:
+    # MB/s is open() latency-bound for tiny files (0.2 KB mnist160 PNGs read ~15 MB/s on local NVMe), so skip it there
+    if avg_ping < threshold_ms and (avg_speed > threshold_mb or np.mean(file_sizes) < 1 << 14):
         LOGGER.info(f"{prefix}Fast image access ✅ ({ping_msg}{speed_msg}{size_msg})")
     else:
         LOGGER.warning(
@@ -273,10 +275,28 @@ def check_image(im_file: str) -> tuple[str, tuple[int, int]]:
     if im.format.lower() in {"jpg", "jpeg"}:
         with open(im_file, "rb") as f:
             f.seek(-2, 2)
-            if f.read() != b"\xff\xd9":  # corrupt JPEG
-                ImageOps.exif_transpose(Image.open(im_file)).save(im_file, "JPEG", subsampling=0, quality=100)
-                msg = f"{im_file}: corrupt JPEG restored and saved"
+            corrupt = f.read() != b"\xff\xd9"
+        if corrupt:  # write a new file and swap it in: the image may be a hard link shared with other versions
+            _replace_image(im_file, lambda tmp: _exif_jpeg(im_file).save(tmp, "JPEG", subsampling=0, quality=100))
+            msg = f"{im_file}: corrupt JPEG restored and saved"
     return msg, shape
+
+
+def _exif_jpeg(im_file: str | Path) -> Image.Image:
+    """Load an image with its EXIF orientation applied, closing the source file."""
+    with Image.open(im_file) as im:
+        return ImageOps.exif_transpose(im)
+
+
+def _replace_image(im_file: str | Path, write) -> None:
+    """Atomically replace an image with what `write(tmp)` saves, so hard links to the original are never modified."""
+    im_file = Path(im_file)
+    tmp = im_file.with_name(f".{im_file.stem}.{uuid4().hex}{im_file.suffix}")
+    try:
+        write(str(tmp))
+        os.replace(tmp, im_file)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def verify_image(args: tuple) -> tuple:
@@ -348,18 +368,19 @@ def verify_image_depth(args: tuple) -> tuple:
 
 
 def verify_image_mask(args: tuple) -> tuple:
-    """Verify that an image and its semantic mask exist, are readable, and have matching shapes.
+    """Verify that an image and its semantic mask exist, are readable, match in shape, and hold valid class ids.
 
     Args:
-        args (tuple): Tuple of (im_file, mask_file, prefix). If mask_file is missing, masks with the same stem and
-            another image extension are tried.
+        args (tuple): Tuple of (im_file, mask_file, prefix, invalid). If mask_file is missing, masks with the same stem
+            and another image extension are tried. invalid is a 256-entry uint8 lookup table that is nonzero for raw
+            mask ids that map to neither a dataset class nor the 255 ignore label.
 
     Returns:
-        (tuple): Tuple of (im_file, mask_file, shape, is_1bit, nm, nf, nc, msg), where the first four are None for
-            rejected samples, is_1bit is whether the mask is a 1-bit PIL image, nm, nf, and nc are missing, found, and
-            corrupt counts, and msg is a log message.
+        (tuple): Tuple of (im_file, mask_file, shape, mode, nm, nf, nc, msg), where the first four are None for rejected
+            samples, mode is the mask's PIL image mode, nm, nf, and nc are missing, found, and corrupt counts, and msg
+            is a log message.
     """
-    im_file, mask_file, prefix = args
+    im_file, mask_file, prefix, invalid = args
     # Number (found, missing, corrupt), message
     nf, nm, nc, msg = 0, 0, 0, ""
     try:
@@ -372,17 +393,24 @@ def verify_image_mask(args: tuple) -> tuple:
                     mask_file = alt_mask_file
                     break
         if os.path.isfile(mask_file):
-            mask = cv2.imread(mask_file, cv2.IMREAD_GRAYSCALE)
+            with Image.open(mask_file) as im:
+                mode = im.mode  # recorded so load_mask reads each mask once and a yaml 'nc' edit never needs a rescan
+                if mode == "P":  # colored (VOC-style) palettes hold class ids as indices, gray palettes as gray levels
+                    p = np.array(im.getpalette()).reshape(-1, 3)
+                    mask = np.asarray(im.convert("L") if (p == p[:, :1]).all() else im)
+                else:
+                    mask = cv2.imread(mask_file, cv2.IMREAD_ANYDEPTH)  # keeps 16-bit ids
             assert mask is not None, f"mask file {mask_file} is unreadable"
             assert mask.shape[:2] == shape, f"mask size {mask.shape[:2]} does not match image size {shape}"
-            with Image.open(mask_file) as im:
-                is_1bit = im.mode == "1"  # recorded for every mask so a yaml 'nc' edit never needs a rescan
+            assert not invalid[mask].any(), (  # ids above 255 raise IndexError
+                f"mask ids {np.unique(mask[invalid[mask] > 0]).tolist()} are not dataset class ids or 255 ignore"
+            )
             nf = 1
         else:
             nm = 1
             msg = f"{prefix}{im_file}: ignoring image with missing mask {mask_file}"
             return None, None, None, None, nm, nf, nc, msg
-        return im_file, mask_file, shape, is_1bit, nm, nf, nc, msg
+        return im_file, mask_file, shape, mode, nm, nf, nc, msg
     except Exception as e:
         nc = 1
         msg = f"{prefix}{im_file}: ignoring corrupt image/mask: {e}"
@@ -413,7 +441,7 @@ def verify_image_label(args: tuple) -> tuple | list:
         if os.path.isfile(lb_file):
             nf = 1  # label found
             with open(lb_file, encoding="utf-8") as f:
-                lb = [x.split() for x in f.read().strip().splitlines() if len(x)]
+                lb = [x.split() for x in f.read().strip().splitlines() if x.strip()]
                 if nkpt and not keypoint:  # pose labels for a box task: keep the box, drop the keypoints
                     lb = [x[:5] if len(x) == 5 + nkpt * ndim else x for x in lb]
                 if any(len(x) > 6 for x in lb) and (not keypoint):  # is segment
@@ -441,6 +469,9 @@ def verify_image_label(args: tuple) -> tuple | list:
                     f"Possible class labels are 0-{num_cls - 1}"
                 )
                 _, i = np.unique(lb, axis=0, return_index=True)
+                if len(i) < nl and segments:  # distinct polygons can share a class and box
+                    rows = np.array([c.tobytes() + s.tobytes() for c, s in zip(lb[:, 0], segments)], dtype=object)
+                    _, i = np.unique(rows, return_index=True)
                 if len(i) < nl:  # duplicate row check
                     lb = lb[i]  # remove duplicates
                     if segments:
@@ -487,7 +518,7 @@ def visualize_image_annotations(image_path: str, txt_path: str, label_map: dict[
 
     from ultralytics.utils.plotting import colors
 
-    img = np.array(Image.open(image_path))
+    img = np.array(ImageOps.exif_transpose(Image.open(image_path)))  # upright, as dataloaders read it for training
     img_height, img_width = img.shape[:2]
     annotations = []
     with open(txt_path, encoding="utf-8") as file:
@@ -604,8 +635,7 @@ def find_dataset_yaml(path: Path) -> Path:
     Returns:
         (Path): The path of the found YAML file.
     """
-    # try root level first and then recursive
-    files = [*path.glob("*.yaml"), *path.glob("*.yml")] or [*path.rglob("*.yaml"), *path.rglob("*.yml")]
+    files = list(path.glob("*.yaml")) or list(path.rglob("*.yaml"))  # try root level first and then recursive
     assert files, f"No YAML file found in '{path.resolve()}'"
     if len(files) > 1:
         files = [f for f in files if f.stem == path.stem]  # prefer YAML files that match
@@ -909,13 +939,13 @@ def compress_one_image(f: str | Path, f_new: str | Path | None = None, max_dim: 
     """
     try:  # use PIL
         Image.MAX_IMAGE_PIXELS = None  # Fix DecompressionBombError, allow optimization of image > ~178.9 million pixels
-        im = Image.open(f)
+        im = _exif_jpeg(f)  # JPEG save drops EXIF, so bake the orientation into the pixels
         if im.mode in {"RGBA", "LA"}:  # Convert to RGB if needed (for JPEG)
             im = im.convert("RGB")
         r = max_dim / max(im.height, im.width)  # ratio
         if r < 1.0:  # image too large
             im = im.resize((int(im.width * r), int(im.height * r)))
-        im.save(f_new or f, "JPEG", quality=quality, optimize=True)  # save
+        _replace_image(f_new or f, lambda tmp: im.save(tmp, "JPEG", quality=quality, optimize=True))
     except Exception as e:  # use OpenCV
         LOGGER.warning(f"Image compression PIL failure {f}: {e}")
         im = cv2.imread(str(f))
@@ -923,7 +953,7 @@ def compress_one_image(f: str | Path, f_new: str | Path | None = None, max_dim: 
         r = max_dim / max(im_height, im_width)  # ratio
         if r < 1.0:  # image too large
             im = cv2.resize(im, (int(im_width * r), int(im_height * r)), interpolation=cv2.INTER_AREA)
-        cv2.imwrite(str(f_new or f), im)
+        _replace_image(f_new or f, lambda tmp: cv2.imwrite(tmp, im))
 
 
 def load_dataset_cache_file(path: Path) -> dict:
@@ -938,9 +968,10 @@ def load_dataset_cache_file(path: Path) -> dict:
     import gc
 
     gc.disable()  # reduce pickle load time https://github.com/ultralytics/ultralytics/pull/1585
-    cache = np.load(str(path), allow_pickle=True).item()  # load dict
-    gc.enable()
-    return cache
+    try:
+        return np.load(str(path), allow_pickle=True).item()  # load dict
+    finally:
+        gc.enable()  # also when loading raises, e.g. no cache file yet
 
 
 def save_dataset_cache_file(prefix: str, path: Path, x: dict, version: str):

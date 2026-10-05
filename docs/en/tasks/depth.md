@@ -161,7 +161,7 @@ For example, an image at `images/train/scene_001.jpg` is paired with a depth map
 
 ### Fine-tuning on your own data
 
-When adapting a pretrained depth model to a custom dataset, **lower the learning rate and use the AdamW optimizer**. The default optimizer settings are tuned for training from scratch (SGD with `lr0=0.01`); applied to an already-converged depth model they can overwrite the pretrained knowledge and degrade results — especially when fine-tuning on a single domain.
+When adapting a pretrained depth model to a custom dataset, **lower the learning rate and use the AdamW optimizer**. The default optimizer settings are tuned for training from scratch; applied to an already-converged depth model they can overwrite the pretrained knowledge and degrade results — especially when fine-tuning on a single domain.
 
 !!! example "Recommended fine-tuning recipe"
 
@@ -195,7 +195,7 @@ Additional tips:
 - **`mosaic`, `mixup`, `cutmix`, and `copy_paste` are not implemented for depth.** The depth dataset loader automatically sets these probabilities to 0, so passing them has no effect. These augmentations are not supported because they combine multiple images, which would produce invalid paired depth maps.
 - **Any depth range works out of the box.** The `log`-head models predict unbounded depth, so they adapt to short-range (macro) or long-range (outdoor/driving) data without changes. Setting `max_depth:` in your dataset YAML (in meters) bounds which GT pixels count toward validation metrics.
 - **Retain general performance.** If you need the model to stay accurate on scenes beyond your training set, mix a small fraction (~5–10%) of diverse general-purpose images into your training data; this substantially reduces forgetting during fine-tuning.
-- **Train from scratch** (`model=yolo26s-depth.yaml`) only if your domain is very different and you have a large dataset — there the default SGD `lr0=0.01` is appropriate, since there are no pretrained weights to preserve.
+- **Train from scratch** (`model=yolo26s-depth.yaml`) only if your domain is very different and you have a large dataset — there the default `optimizer=auto` is appropriate, since there are no pretrained weights to preserve.
 
 ### Calibrating the depth scale
 
@@ -295,6 +295,30 @@ YOLO depth estimation returns one `Results` object per image. Each result stores
 | `result.masks`      | -              | -       | No instance masks.                                       |
 
 For task-specific `Results` fields across every task, see the [Predict Results by Task](../modes/predict.md#results-by-task) section.
+
+### Per-object depth with instance segmentation
+
+Combine [instance segmentation](segment.md) with depth to estimate how far away each detected object is. Run both models on the same image with `retina_masks=True` so the masks share the depth map's original-image resolution, then take the median of the valid depth pixels inside each mask.
+
+!!! example "Median depth per segmented object"
+
+    === "Python"
+
+        ```python
+        from ultralytics import YOLO
+
+        image = "https://ultralytics.com/images/bus.jpg"
+        seg = YOLO("yolo26n-seg.pt")(image, retina_masks=True)[0]
+        depth = YOLO("yolo26n-depth.pt")(image)[0].depth.data  # (H, W) meters
+
+        if seg.masks is not None:
+            for mask, cls in zip(seg.masks.data.bool(), seg.boxes.cls):
+                values = depth[mask & (depth > 0)]  # valid depth pixels inside this mask
+                if values.numel():
+                    print(f"{seg.names[int(cls)]}: {values.median():.2f} m")
+        ```
+
+The median is robust to background pixels at mask edges, but it describes the object's visible surface rather than its center, and its accuracy follows the model's depth scale (see [Calibrating the depth scale](#calibrating-the-depth-scale)).
 
 ### Colorizing the depth map
 
