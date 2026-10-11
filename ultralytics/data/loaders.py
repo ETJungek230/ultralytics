@@ -336,7 +336,7 @@ class LoadImagesAndVideos:
         fps (float): Frames per second of the current video as reported by OpenCV.
         count (int): Counter for iteration, initialized at 0 during __iter__().
         ni (int): Number of images.
-        cv2_flag (int): OpenCV flag for image reading (grayscale or color/BGR).
+        cv2_flag (int): OpenCV flag for image reading (grayscale, color/BGR, or unchanged for other channel counts).
 
     Methods:
         __init__: Initialize the LoadImagesAndVideos object.
@@ -411,7 +411,7 @@ class LoadImagesAndVideos:
         self.mode = "video" if ni == 0 else "image"  # default to video if no images
         self.vid_stride = vid_stride  # video frame-rate stride
         self.bs = batch
-        self.cv2_flag = cv2.IMREAD_GRAYSCALE if channels == 1 else cv2.IMREAD_COLOR  # grayscale or color (BGR)
+        self.cv2_flag = {1: cv2.IMREAD_GRAYSCALE, 3: cv2.IMREAD_COLOR}.get(channels, cv2.IMREAD_UNCHANGED)
         if any(videos):
             self._new_video(videos[0])  # new video
         else:
@@ -574,10 +574,10 @@ class LoadPilAndNumpy:
             raise TypeError(f"Expected PIL/np.ndarray image type, but got {type(im)}")
         pil = isinstance(im, Image.Image)
         if pil:
+            if im.mode.startswith("I;16"):  # convert() clips 16-bit values at 255, scale them like cv2 does
+                im = Image.fromarray((np.asarray(im) >> 8).astype(np.uint8))
             flag = "L" if channels == 1 else "RGB"
             im = np.asarray(im if im.mode == flag else im.convert(flag))  # convert() copies even when mode matches
-            if flag == "L":
-                im = im[..., None]
         im = np.atleast_3d(im)
         # Both routes validate here: a zero dimension divides by zero in LetterBox, and a batched array reads
         # shape[2] as a channel count it is not. Raised rather than asserted so `python -O` keeps the check, and

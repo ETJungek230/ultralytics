@@ -615,8 +615,8 @@ class Exporter:
         fmt = self.args.format = self.args.format.lower()  # to lowercase
         if fmt in {"tensorrt", "trt"}:  # 'engine' aliases
             fmt = self.args.format = "engine"
-        if fmt in {"mlmodel", "mlpackage", "mlprogram", "apple", "ios", "coreml"}:  # 'coreml' aliases
-            fmt = "coreml"
+        if fmt in {"mlmodel", "mlpackage", "mlprogram", "apple", "ios"}:  # 'coreml' aliases, legacy 'mlmodel' kept
+            fmt, self.args.format = "coreml", "mlmodel" if fmt == "mlmodel" else "coreml"
         if fmt in {"huawei", "cann", "om"}:  # 'ascend' aliases
             fmt = self.args.format = "ascend"
         if fmt in {"vitis", "vitisai", "versal"}:  # 'xilinx' aliases
@@ -1222,13 +1222,10 @@ class Exporter:
 
         # FP16 conversion for CPU export (GPU exports are already FP16 from model.half() during tracing)
         if self.args.quantize == 16 and self.args.format == "onnx" and self.device.type == "cpu":
-            try:
-                from onnxruntime.transformers import float16
+            from onnxruntime.transformers import float16
 
-                LOGGER.info(f"{prefix} converting to FP16...")
-                model_onnx = float16.convert_float_to_float16(model_onnx, keep_io_types=True)
-            except Exception as e:
-                LOGGER.warning(f"{prefix} FP16 conversion failure: {e}")
+            LOGGER.info(f"{prefix} converting to FP16...")
+            model_onnx = float16.convert_float_to_float16(model_onnx, keep_io_types=True)
 
         onnx.save(model_onnx, f)
         del model_onnx
@@ -1402,7 +1399,8 @@ class Exporter:
             )
             inputs = [ct.TensorType("image", shape=input_shape)]
         else:
-            inputs = [ct.ImageType("image", shape=self.im.shape, scale=1 / 255, bias=[0.0, 0.0, 0.0])]
+            layout = ct.colorlayout.GRAYSCALE if self.im.shape[1] == 1 else ct.colorlayout.RGB
+            inputs = [ct.ImageType("image", shape=self.im.shape, scale=1 / 255, color_layout=layout)]
 
         quantize = 16 if self.args.nms and not mlmodel and self.args.quantize is None else self.args.quantize
         self.metadata["args"]["quantize"] = quantize
@@ -1704,13 +1702,12 @@ class Exporter:
     def export_hailo(self, prefix=colorstr("Hailo:")):  # noqa: B008
         """Export a YOLO model to Hailo Executable Format (HEF)."""
         try:
-            import tensorflow as tf
             from hailo_sdk_client import ClientRunner
         except ImportError as e:
             raise ImportError("Hailo export requires the Hailo Dataflow Compiler.") from e
 
-        calibration_dataloader = self.get_int8_calibration_dataloader(prefix)
-        calibration_size = len(calibration_dataloader.dataset)
+        calibration_images = self._int8_calibration_images(prefix)  # fixed set, every DFC pass must see the same images
+        calibration_size = len(calibration_images)
         LOGGER.warning(
             f"\nHailo level-2 optimization will use {calibration_size} calibration images. "
             "Hailo recommends at least 1,024 representative images for best accuracy. "
@@ -1823,17 +1820,7 @@ class Exporter:
                     model_script.append("allocator_param(width_splitter_defuse=disabled)")
             runner.load_model_script("\n".join(model_script))
 
-            def calibration_dataset():
-                for batch in calibration_dataloader:
-                    for image in batch["img"].permute(0, 2, 3, 1).numpy().astype(np.float32):
-                        yield image, {}
-
-            runner.optimize(
-                lambda: tf.data.Dataset.from_generator(
-                    calibration_dataset,
-                    output_signature=(tf.TensorSpec(shape=(*self.imgsz, 3), dtype=tf.float32), {}),
-                )
-            )
+            runner.optimize(calibration_images)
             (output_dir / f"{self.file.stem}.hef").write_bytes(runner.compile())
             YAML.save(
                 output_dir / "metadata.yaml",
@@ -2001,6 +1988,8 @@ class NMSModel(torch.nn.Module):
                 score *= mask
                 # Explicit length otherwise reshape error, hardcoded to `self.args.max_det * 5`
                 mask = score.topk(min(self.args.max_det * 5, score.shape[0])).indices
+            elif self.args.format in {"coreml", "mlmodel"}:  # CoreML aborts on an empty gather: keep the top anchor
+                mask, score = torch.logical_or(mask, score == score.max()), score * mask
             box, score, cls, extra = box[mask], score[mask], cls[mask], extra[mask]
             nmsbox = box.clone()
             # `8` is the minimum value experimented to get correct NMS results for obb

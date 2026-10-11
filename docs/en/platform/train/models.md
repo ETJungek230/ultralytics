@@ -54,18 +54,13 @@ See [Cloud Training](cloud-training.md) for detailed instructions.
 ## Model Lifecycle
 
 ```mermaid
-graph LR
-    A[Upload .pt]:::start --> B[Overview]:::proc
-    C[Train]:::start --> B
-    B --> D[Predict]:::proc
-    B --> E[Export]:::proc
-    B --> F[Deploy]:::proc
-    E --> G[22 Formats]:::out
-    F --> H[Endpoint]:::out
-
-    classDef start fill:#4CAF50,color:#fff
-    classDef proc fill:#2196F3,color:#fff
-    classDef out fill:#9C27B0,color:#fff
+flowchart TD
+    A([Upload .pt]) --> C[Overview]
+    B([Train]) --> C
+    C --> D[Predict]
+    C --> E[Export]
+    C --> F[Deploy]
+    E --> G[22 formats]
 ```
 
 ## Model Page Tabs
@@ -213,19 +208,14 @@ Detection models trained with a [saved dataset version](cloud-training.md#save-d
 ## Export Model
 
 ```mermaid
-graph LR
-    A[Select Format]:::start --> B[Configure Args]:::proc
-    B --> C[Export]:::proc
-    C --> D{GPU Required?}:::decide
-    D -->|Yes| E[Cloud GPU Export]:::proc
-    D -->|No| F[CPU Export]:::proc
-    E --> G[Download]:::out
+flowchart TD
+    A([Select a format]) --> B[Configure arguments]
+    B --> C[Click Export]
+    C --> D{GPU required?}
+    D -->|yes| E[Cloud GPU export]
+    D -->|no| F[CPU export]
+    E --> G([Download])
     F --> G
-
-    classDef start fill:#4CAF50,color:#fff
-    classDef proc fill:#2196F3,color:#fff
-    classDef decide fill:#FF9800,color:#fff
-    classDef out fill:#9C27B0,color:#fff
 ```
 
 Export your model to 22 deployment formats:
@@ -465,7 +455,10 @@ Model comparison works within a project. To compare across projects:
 
 Uploaded `.pt` model files are limited to 1 GB, and models near that limit may take longer to upload and process.
 
-### Can I fine-tune pretrained models?
+### How do I keep training a model with new images or classes?
 
-Yes. Choose a compatible model from the official YOLO26, YOLO11, YOLOv8, or YOLOv5 projects, or select one of
-your own completed or uploaded checkpoints from **My Models** in the training dialog.
+Add the new images to your dataset (and any new classes), then click **New Model** and pick your existing model from
+**My Models** in the training dialog as the starting point. This fine-tunes a new model from your checkpoint; it does
+not continue the old run, which stays unchanged. The class list can change: the new model reuses the features your
+model has already learned and learns the new classes during training. You can also start from any official YOLO26,
+YOLO11, YOLOv8 or YOLOv5 model, or from a `.pt` file you [uploaded](#upload-model).

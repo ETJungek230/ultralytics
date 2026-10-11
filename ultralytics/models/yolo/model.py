@@ -8,9 +8,9 @@ from typing import Any
 import numpy as np
 import torch
 
-from ultralytics.cfg import get_cfg
+from ultralytics.cfg import _handle_deprecation, get_cfg
 from ultralytics.data.build import load_inference_source
-from ultralytics.engine.model import Model
+from ultralytics.engine.model import PREDICTOR_SETUP_KEYS, Model
 from ultralytics.models import yolo
 from ultralytics.nn.autobackend import check_class_names
 from ultralytics.nn.backends.base import BaseBackend
@@ -472,7 +472,7 @@ class YOLOE(Model):
         stream: bool = False,
         visual_prompts: dict[str, np.ndarray | list[np.ndarray]] | None = None,
         refer_image=None,
-        predictor=yolo.yoloe.YOLOEVPDetectPredictor,
+        predictor: type | None = None,
         **kwargs,
     ):
         """Run prediction on images, videos, directories, streams, etc.
@@ -486,7 +486,8 @@ class YOLOE(Model):
                 for the model. Must include 'bboxes' and 'cls' keys when non-empty, holding either flat arrays or one
                 array per image for an explicit list, tuple, or 4-D tensor source with no refer_image.
             refer_image (str | PIL.Image | np.ndarray, optional): Reference image for visual prompts.
-            predictor (type): Predictor class for visual prompt predictions. Defaults to YOLOEVPDetectPredictor.
+            predictor (type, optional): Visual-prompt predictor class. Defaults to the predictor matching the model
+                task.
             **kwargs (Any): Additional keyword arguments passed to the predictor.
 
         Returns:
@@ -534,21 +535,16 @@ class YOLOE(Model):
             per_image = [len(set(c.tolist() if isinstance(c, np.ndarray) else c)) for _, c in pairs]
             assert all(per_image), "Expected at least one class per image"
             num_cls = max(per_image)
+            overrides = {"verbose": refer_image is None, **self.overrides, **_handle_deprecation(kwargs)}
+            overrides.update(task=self.model.task, mode="predict", save=False, batch=1)
+            predictor = predictor or (
+                yolo.yoloe.YOLOEVPSegPredictor if self.model.task == "segment" else yolo.yoloe.YOLOEVPDetectPredictor
+            )
             if type(self.predictor) is not predictor:
-                args = get_cfg(overrides={**self.overrides, **kwargs})
-                self.predictor = predictor(
-                    overrides={
-                        "task": self.model.task,
-                        "mode": "predict",
-                        "save": False,
-                        "verbose": kwargs.get("verbose", self.overrides.get("verbose", refer_image is None)),
-                        "batch": 1,
-                        "device": args.device,
-                        "quantize": args.quantize,
-                        "imgsz": args.imgsz,
-                    },
-                    _callbacks=self.callbacks,
-                )
+                self.predictor = predictor(overrides=overrides, _callbacks=self.callbacks)
+            else:  # setup_model below applies this call's setup args, with unset quantize as FP32 like Model.predict
+                setup = {"quantize": None, **{k: overrides[k] for k in PREDICTOR_SETUP_KEYS if k in overrides}}
+                self.predictor.args = get_cfg(self.predictor.args, setup)
 
             self.predictor.set_prompts(visual_prompts.copy())
             self.predictor.setup_model(model=self.model, verbose=self.predictor.args.verbose)
