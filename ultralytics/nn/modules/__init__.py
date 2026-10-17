@@ -76,6 +76,7 @@ from .conv import (
     RepConv,
     SpatialAttention,
     DualConv,
+    AKConv,
 )
 from .head import (
     OBB,
@@ -86,6 +87,7 @@ from .head import (
     LRPCHead,
     Pose,
     Pose26,
+    PoseCus,
     RTDETRDecoder,
     Segment,
     Segment26,
@@ -173,6 +175,7 @@ __all__ = (
     "MaxSigmoidAttnBlock",
     "Pose",
     "Pose26",
+    "PoseCus",
     "Proto",
     "RTDETRDecoder",
     "RepC3",
@@ -186,6 +189,7 @@ __all__ = (
     "SemanticSegment",
     "SpatialAttention",
     "DualConv",
+    "AKConv",
     "TorchVision",
     "TransformerBlock",
     "TransformerEncoderLayer",

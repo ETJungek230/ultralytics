@@ -19,6 +19,7 @@ from .block import DFL, SAVPE, BNContrastiveHead, ContrastiveHead, Proto, Proto2
 from .conv import Conv, DWConv
 from .transformer import MLP, DeformableTransformerDecoder, DeformableTransformerDecoderLayer
 from .utils import bias_init_with_prob
+from .attention import SE, ECA
 
 __all__ = (
     "OBB",
@@ -781,6 +782,32 @@ class Pose26(Pose):
             y[:, 0::ndim] = (y[:, 0::ndim] + self.anchors[0]) * self.strides
             y[:, 1::ndim] = (y[:, 1::ndim] + self.anchors[1]) * self.strides
             return y
+
+
+class PoseCus(Pose26):
+    """Adapted Pose head, new class head."""
+
+    def __init__(
+            self,
+            nc: int = 80,
+            kpt_shape: tuple = (17, 3),
+            reg_max: int = 16,
+            end2end: bool = False,
+            ch: list[int] | tuple[int, ...] = (),
+    ):
+        super().__init__(nc, kpt_shape, reg_max, end2end, ch)
+        c3 = max(ch[0], min(self.nc, 100))  # channels
+        self.cv3 = nn.ModuleList(
+            nn.Sequential(
+                nn.Sequential(DWConv(x, x, 3), Conv(x, c3, 1)),
+                nn.Sequential(ECA(3)),
+                nn.Sequential(DWConv(c3, c3, 3), Conv(c3, c3, 1)),
+                nn.Conv2d(c3, self.nc, 1),
+            )
+            for x in ch
+        )
+        if end2end:
+            self.one2one_cv3 = copy.deepcopy(self.cv3)
 
 
 class Depth(nn.Module):

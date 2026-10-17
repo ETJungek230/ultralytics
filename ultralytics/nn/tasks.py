@@ -54,6 +54,7 @@ from ultralytics.nn.modules import (
     DWConv,
     DWConvTranspose2d,
     DualConv,
+    AKConv,
     Focus,
     GhostBottleneck,
     GhostConv,
@@ -64,6 +65,7 @@ from ultralytics.nn.modules import (
     LRPCHead,
     Pose,
     Pose26,
+    PoseCus,
     RepC3,
     RepConv,
     RepNCSPELAN4,
@@ -260,7 +262,7 @@ class BaseModel(torch.nn.Module):
             for m in self.model.modules():
                 if isinstance(m, skip):
                     continue
-                if isinstance(m, (Conv, Conv2, DWConv, DualConv)) and hasattr(m, "bn"):
+                if isinstance(m, (Conv, Conv2)) and hasattr(m, "bn"):
                     if isinstance(m, Conv2):
                         m.fuse_convs()
                     m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
@@ -2078,7 +2080,8 @@ def parse_model(d, ch, verbose=True):
     import ast
 
     # Args
-    legacy = True  # backward compatibility for v3/v5/v8/v9 models
+    legacy_inferred = True  # backward compatibility for v3/v5/v8/v9 models
+    legacy_override = d.get("legacy", None)
     max_channels = float("inf")
     nc, act, scales, end2end = (d.get(x) for x in ("nc", "activation", "scales", "end2end"))
     reg_max = d.get("reg_max", 16)
@@ -2110,6 +2113,7 @@ def parse_model(d, ch, verbose=True):
             ConvTranspose,
             GhostConv,
             DualConv,
+            AKConv,
             Bottleneck,
             GhostBottleneck,
             SPP,
@@ -2199,15 +2203,15 @@ def parse_model(d, ch, verbose=True):
                 args.insert(2, n)  # number of repeats
                 n = 1
             if m is C3k2 or m is PConvC3k2:  # for M/L/X sizes
-                legacy = False
+                legacy_inferred = False
                 if scale in {"m", "l", "x"}:
                     args[3:4] = [True]  # slice assignment also supplies c3k when the YAML omits it
             if m is A2C2f:
-                legacy = False
+                legacy_inferred = False
                 if scale in {"l", "x"}:  # for L/X sizes
                     args.extend((True, 1.2))
             if m is C2fCIB:
-                legacy = False
+                legacy_inferred = False
         elif m is AIFI:
             args = [ch[f], *args]
         elif m in frozenset({HGStem, HGBlock}):
@@ -2233,6 +2237,7 @@ def parse_model(d, ch, verbose=True):
                 YOLOESegment26,
                 Pose,
                 Pose26,
+                PoseCus,
                 OBB,
                 OBB26,
             }
@@ -2240,8 +2245,11 @@ def parse_model(d, ch, verbose=True):
             args.extend([reg_max, end2end, [ch[x] for x in f]])
             if m is Segment or m is YOLOESegment or m is Segment26 or m is YOLOESegment26:
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
-            if m in {Detect, YOLOEDetect, Segment, Segment26, YOLOESegment, YOLOESegment26, Pose, Pose26, OBB, OBB26}:
-                m.legacy = legacy
+            if m in {Detect, YOLOEDetect,
+                     Segment, Segment26, YOLOESegment, YOLOESegment26,
+                     Pose, Pose26, PoseCus,
+                     OBB, OBB26}:
+                m.legacy = legacy_inferred if legacy_override is None else legacy_override
         elif m is Depth:
             args = [*args[:1], [ch[x] for x in f]]  # c_mid, ch tuple; drops the legacy mode arg old checkpoints store
         elif m is SemanticSegment:

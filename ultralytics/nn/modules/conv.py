@@ -24,6 +24,8 @@ __all__ = (
     "LightConv",
     "RepConv",
     "SpatialAttention",
+    "DualConv",
+    "AKConv",
 )
 
 
@@ -805,3 +807,94 @@ class DualConv(nn.Module):
         """
 
         return self.conv_g(x) + self.conv_pw(x)
+
+
+class AKConv(nn.Module):
+    """Adaptive kernel convolution using bilinearly sampled input features."""
+
+    def __init__(self, inc, outc, num_param, stride=1, bias=None):
+        super().__init__()
+        self.num_param = num_param
+        self.stride = stride
+        self.conv = nn.Sequential(
+            nn.Conv2d(inc, outc, kernel_size=(num_param, 1), stride=(num_param, 1), bias=bias),
+            nn.BatchNorm2d(outc),
+            nn.SiLU(),
+        )
+        self.p_conv = nn.Conv2d(inc, 2 * num_param, kernel_size=3, padding=1, stride=stride)
+        nn.init.zeros_(self.p_conv.weight)
+        self.p_conv.register_full_backward_hook(self._set_lr)
+
+    @staticmethod
+    def _set_lr(module, grad_input, grad_output):
+        """Scale offset convolution gradients."""
+        return tuple(g * 0.1 if g is not None else None for g in grad_input)
+
+    def forward(self, x):
+        offset = self.p_conv(x)
+        n, h, w = self.num_param, *offset.shape[-2:]
+        p = self._get_p(offset).permute(0, 2, 3, 1)
+        p_x, p_y = p[..., :n], p[..., n:]
+
+        q_lt = torch.cat((p_x.detach().floor(), p_y.detach().floor()), dim=-1)
+        q_rb = q_lt + 1
+        q_lt = torch.cat((q_lt[..., :n].clamp(0, x.shape[2] - 1), q_lt[..., n:].clamp(0, x.shape[3] - 1)), dim=-1).long()
+        q_rb = torch.cat((q_rb[..., :n].clamp(0, x.shape[2] - 1), q_rb[..., n:].clamp(0, x.shape[3] - 1)), dim=-1).long()
+        q_lb = torch.cat((q_lt[..., :n], q_rb[..., n:]), dim=-1)
+        q_rt = torch.cat((q_rb[..., :n], q_lt[..., n:]), dim=-1)
+        p = torch.cat((p_x.clamp(0, x.shape[2] - 1), p_y.clamp(0, x.shape[3] - 1)), dim=-1)
+        p_x, p_y = p[..., :n], p[..., n:]
+
+        def weight(q, sign_x, sign_y):
+            q_x, q_y = q[..., :n].to(p.dtype), q[..., n:].to(p.dtype)
+            return (1 + sign_x * (q_x - p_x)) * (1 + sign_y * (q_y - p_y))
+
+        x_offset = (
+            weight(q_lt, 1, 1).unsqueeze(1) * self._get_x_q(x, q_lt, n)
+            + weight(q_rb, -1, -1).unsqueeze(1) * self._get_x_q(x, q_rb, n)
+            + weight(q_lb, 1, -1).unsqueeze(1) * self._get_x_q(x, q_lb, n)
+            + weight(q_rt, -1, 1).unsqueeze(1) * self._get_x_q(x, q_rt, n)
+        )
+        return self.conv(self._reshape_x_offset(x_offset))
+
+    def _get_p_n(self, device, dtype):
+        n = self.num_param
+        base = round(math.sqrt(n))
+        rows, remainder = divmod(n, base)
+        y, x = torch.meshgrid(
+            torch.arange(rows, device=device), torch.arange(base, device=device), indexing="ij"
+        )
+        p_x, p_y = y.flatten(), x.flatten()
+        if remainder:
+            y, x = torch.meshgrid(
+                torch.arange(rows, rows + 1, device=device),
+                torch.arange(remainder, device=device), indexing="ij"
+            )
+            p_x, p_y = torch.cat((p_x, y.flatten())), torch.cat((p_y, x.flatten()))
+        return torch.cat((p_x, p_y)).to(dtype=dtype).view(1, 2 * n, 1, 1)
+
+    def _get_p_0(self, h, w, device, dtype):
+        y, x = torch.meshgrid(
+            torch.arange(h, device=device) * self.stride,
+            torch.arange(w, device=device) * self.stride, indexing="ij"
+        )
+        y = y.to(dtype=dtype).view(1, 1, h, w).expand(1, self.num_param, h, w)
+        x = x.to(dtype=dtype).view(1, 1, h, w).expand(1, self.num_param, h, w)
+        return torch.cat((y, x), dim=1)
+
+    def _get_p(self, offset):
+        _, _, h, w = offset.shape
+        return self._get_p_0(h, w, offset.device, offset.dtype) + self._get_p_n(offset.device, offset.dtype) + offset
+
+    @staticmethod
+    def _get_x_q(x, q, n):
+        b, h, w, _ = q.shape
+        c, input_w = x.shape[1], x.shape[3]
+        index = (q[..., :n] * input_w + q[..., n:]).reshape(b, 1, h * w * n)
+        index = index.expand(-1, c, -1)
+        return x.flatten(2).gather(2, index).reshape(b, c, h, w, n)
+
+    @staticmethod
+    def _reshape_x_offset(x_offset):
+        b, c, h, w, n = x_offset.shape
+        return x_offset.permute(0, 1, 2, 4, 3).reshape(b, c, h * n, w)
