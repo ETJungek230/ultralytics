@@ -65,7 +65,7 @@ from ultralytics.nn.modules import (
     LRPCHead,
     Pose,
     Pose26,
-    PoseCus,
+    PoseAf,
     RepC3,
     RepConv,
     RepNCSPELAN4,
@@ -100,6 +100,7 @@ from ultralytics.utils.loss import (
     DepthLoss26,
     E2ELoss,
     PoseLoss26,
+    PoseLossAf,
     SemanticSegmentationLoss,
     v8ClassificationLoss,
     v8DetectionLoss,
@@ -341,9 +342,33 @@ class BaseModel(torch.nn.Module):
         """
         model = (weights.get("ema") or weights["model"]) if isinstance(weights, dict) else weights  # ema first
         csd = model.float().state_dict()  # checkpoint state_dict as FP32
-        # Detect cls branch width (c3) depends on nc, so rebuild it at the source width to transfer its hidden layers,
-        # but only when the head input widths match, since a branch from another model scale cannot run on this neck
+        # Detect cls branch width (c3) depends on nc. Rebuild compatible same-layout branches at source width,
+        # while keeping the destination classifier type (Conv2d or PoseCus _CosineClassifier).
         head, src_head = self.model[-1], getattr(model, "model", [None])[-1]
+
+        def _cls_in_channels(layer):
+            return getattr(layer, "in_channels", layer.weight.shape[1])
+
+        def _cls_out_channels(layer):
+            return getattr(layer, "out_channels", layer.weight.shape[0])
+
+        def _new_cls_layer_like(layer, in_channels, out_channels):
+            if isinstance(layer, nn.Conv2d):
+                return nn.Conv2d(
+                    in_channels,
+                    out_channels,
+                    layer.kernel_size,
+                    stride=layer.stride,
+                    padding=layer.padding,
+                    dilation=layer.dilation,
+                    groups=layer.groups,
+                    bias=layer.bias is not None,
+                    padding_mode=layer.padding_mode,
+                )
+            if type(layer).__name__ == "_CosineClassifier":
+                return type(layer)(in_channels, out_channels, scale=layer.scale)
+            return None
+
         if (
             isinstance(head, Detect)
             and isinstance(src_head, Detect)
@@ -352,16 +377,56 @@ class BaseModel(torch.nn.Module):
         ):
             for attr in ("cv3", "one2one_cv3"):
                 dst, src = getattr(head, attr, None), getattr(src_head, attr, None)
-                if dst is not None and src is not None and dst[0][-1].in_channels != src[0][-1].in_channels:
-                    src = deepcopy(src)
-                    for s, d in zip(src, dst):
-                        if s[-1].out_channels != d[-1].out_channels:  # new class count
-                            s[-1] = nn.Conv2d(s[-1].in_channels, d[-1].out_channels, 1)
-                        for sp, dp in zip(s.parameters(), d.parameters()):
-                            sp.requires_grad_(dp.requires_grad)
-                    setattr(head, attr, src.to(dst[0][-1].weight.device, dst[0][-1].weight.dtype).train(dst.training))
-                    head.bias_init()
+                if dst is None or src is None or len(dst) != len(src):
+                    continue
+                if any(len(d) != len(s) for d, s in zip(dst, src)):
+                    continue  # Different branch layouts (e.g. Detect vs PoseCus) load their shared state keys below.
+                if not any(_cls_in_channels(d[-1]) != _cls_in_channels(s[-1]) for d, s in zip(dst, src)):
+                    continue
+                src = deepcopy(src)
+                for s, d in zip(src, dst):
+                    src_last, dst_last = s[-1], d[-1]
+                    if (
+                        _cls_in_channels(src_last) != _cls_in_channels(dst_last)
+                        or _cls_out_channels(src_last) != _cls_out_channels(dst_last)
+                        or type(src_last) is not type(dst_last)
+                    ):
+                        replacement = _new_cls_layer_like(
+                            dst_last, _cls_in_channels(src_last), _cls_out_channels(dst_last)
+                        )
+                        if replacement is not None:
+                            replacement.requires_grad_(dst_last.weight.requires_grad)
+                            if (getattr(replacement, 'bias', None) is not None and
+                                    getattr(dst_last, 'bias', None) is not None):
+                                replacement.bias.requires_grad_(dst_last.bias.requires_grad)
+                            s[-1] = replacement
+                for s, d in zip(src, dst):
+                    for sp, dp in zip(s.parameters(), d.parameters()):
+                        sp.requires_grad_(dp.requires_grad)
+                setattr(head, attr, src.to(dst[0][-1].weight.device, dst[0][-1].weight.dtype).train(dst.training))
+                head.bias_init()
 
+        # Match classification tensor keys by branch and level even if the source/destination final indices differ,
+        # then reshape equivalent 2D cosine weights and 1x1 Conv2d weights to the destination representation.
+        if isinstance(head, Detect) and isinstance(src_head, Detect):
+            head_prefix = next((name for name, module in self.named_modules() if module is head), None)
+            if head_prefix:
+                target_state = self.state_dict()
+                for attr in ("cv3", "one2one_cv3"):
+                    dst, src = getattr(head, attr, None), getattr(src_head, attr, None)
+                    if dst is None or src is None:
+                        continue
+                    for i, (dst_seq, src_seq) in enumerate(zip(dst, src)):
+                        for param in ("weight", "bias"):
+                            dst_key = f"{head_prefix}.{attr}.{i}.{len(dst_seq) - 1}.{param}"
+                            src_key = f"{head_prefix}.{attr}.{i}.{len(src_seq) - 1}.{param}"
+                            if src_key in csd and dst_key != src_key:
+                                csd[dst_key] = csd.pop(src_key)
+                            if dst_key not in csd or dst_key not in target_state:
+                                continue
+                            src_tensor, dst_tensor = csd[dst_key], target_state[dst_key]
+                            if src_tensor.ndim != dst_tensor.ndim and src_tensor[0].numel() == dst_tensor[0].numel():
+                                csd[dst_key] = src_tensor.reshape(src_tensor.shape[0], *dst_tensor.shape[1:])
         # Remap classification head rows by class-name when nc differs (e.g. Obj365 -> COCO fine-tune)
         cls_remapped = self._remap_cls_by_names(csd, model, verbose=verbose)
 
@@ -439,11 +504,11 @@ class BaseModel(torch.nn.Module):
             else:
                 continue
             for prefix, seq in branches.items():
-                if seq is not None and getattr(seq[-1], "out_channels", None) == tgt_nc:
+                if seq is not None and getattr(seq[-1], "out_channels", seq[-1].weight.shape[0]) == tgt_nc:
                     cls_keys.update(f"{name}.{prefix}.{len(seq) - 1}.{p}" for p in ("weight", "bias"))
 
         remapped = 0
-        for k in cls_keys & csd.keys():
+        for k in cls_keys & csd.keys() & state_dict.keys():
             v_src, v_tgt = csd[k], state_dict[k]
             if v_src.shape[1:] != v_tgt.shape[1:]:  # cls-conv input width differs across model scales; copy bias only
                 continue
@@ -836,8 +901,14 @@ class PoseModel(DetectionModel):
 
     def init_criterion(self):
         """Initialize the loss criterion for the PoseModel."""
-        loss = PoseLoss26 if isinstance(self.model[-1], Pose26) else v8PoseLoss
-        return E2ELoss(self, loss) if getattr(self.model[-1], "one2one_cv2", None) is not None else loss(self)
+        head = self.model[-1]
+        if isinstance(head, PoseAf):
+            loss = PoseLossAf
+        elif isinstance(head, Pose26):
+            loss = PoseLoss26
+        else:
+            loss = v8PoseLoss
+        return E2ELoss(self, loss) if getattr(head, "one2one_cv2", None) is not None else loss(self)
 
 
 class DepthModel(DetectionModel):
@@ -2237,7 +2308,7 @@ def parse_model(d, ch, verbose=True):
                 YOLOESegment26,
                 Pose,
                 Pose26,
-                PoseCus,
+                PoseAf,
                 OBB,
                 OBB26,
             }
@@ -2247,7 +2318,7 @@ def parse_model(d, ch, verbose=True):
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
             if m in {Detect, YOLOEDetect,
                      Segment, Segment26, YOLOESegment, YOLOESegment26,
-                     Pose, Pose26, PoseCus,
+                     Pose, Pose26, PoseAf,
                      OBB, OBB26}:
                 m.legacy = legacy_inferred if legacy_override is None else legacy_override
         elif m is Depth:

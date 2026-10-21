@@ -784,8 +784,24 @@ class Pose26(Pose):
             return y
 
 
-class PoseCus(Pose26):
-    """Adapted Pose head, new class head."""
+class _PoseAttnBlock(nn.Module):
+    """Residual multi-scale context block for low-resolution pose classification features."""
+
+    def __init__(self, channels: int):
+        super().__init__()
+        self.local = DWConv(channels, channels, 3)
+        self.context = DWConv(channels, channels, 3, d=2)
+        self.fuse = Conv(2 * channels, channels, 1)
+        # self.attention = SE(channels)  # Alternative attention block.
+        self.attention = ECA(3)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        features = torch.cat((self.local(x), self.context(x)), dim=1)
+        return x + self.fuse(features)
+
+
+class PoseAttn(Pose26):
+    """Adapted Pose 26 head, Attn block in cls head."""
 
     def __init__(
             self,
@@ -808,6 +824,66 @@ class PoseCus(Pose26):
         )
         if end2end:
             self.one2one_cv3 = copy.deepcopy(self.cv3)
+
+
+class _CosineClassifier(nn.Module):
+    """Normalized cosine classifier that preserves the usual BCHW class-logit shape."""
+
+    def __init__(self, channels: int, num_classes: int, scale: float = 16.0):
+        super().__init__()
+        self.weight = nn.Parameter(torch.empty(num_classes, channels))
+        self.scale = scale
+        nn.init.xavier_uniform_(self.weight)
+
+    @property
+    def in_channels(self) -> int:
+        """Return the feature channel count, matching nn.Conv2d's interface."""
+        return self.weight.shape[1]
+
+    @property
+    def out_channels(self) -> int:
+        """Return the class channel count, matching nn.Conv2d's interface."""
+        return self.weight.shape[0]
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        weight = F.normalize(self.weight, p=2, dim=1)
+        cosine = F.conv2d(F.normalize(x, p=2, dim=1), weight[:, :, None, None])
+        return cosine * self.scale
+
+
+class PoseAf(Pose26):
+    """Pose head with a normalized cosine classifier in cv3."""
+
+    cosine_scale = 8.0
+
+    def __init__(
+            self,
+            nc: int = 80,
+            kpt_shape: tuple = (17, 3),
+            reg_max: int = 16,
+            end2end: bool = False,
+            ch: list[int] | tuple[int, ...] = (),
+    ):
+        super().__init__(nc, kpt_shape, reg_max, end2end, ch)
+        c3 = max(ch[0], min(self.nc, 100))
+        self.cv3 = nn.ModuleList(
+            nn.Sequential(
+                nn.Sequential(DWConv(x, x, 3), Conv(x, c3, 1)),
+                nn.Sequential(DWConv(c3, c3, 3), Conv(c3, c3, 1)),
+                _CosineClassifier(c3, self.nc, scale=self.cosine_scale),
+            )
+            for x in ch
+        )
+        if end2end:
+            self.one2one_cv3 = copy.deepcopy(self.cv3)
+
+    def bias_init(self) -> None:
+        """Initialize box biases; the cosine classifier has no class bias to initialize."""
+        for box_head in self.cv2:
+            box_head[-1].bias.data[:] = 2.0
+        if getattr(self, "one2one_cv2", None) is not None:
+            for box_head in self.one2one_cv2:
+                box_head[-1].bias.data[:] = 2.0
 
 
 class Depth(nn.Module):

@@ -813,7 +813,7 @@ class AKConv(nn.Module):
     """Adaptive kernel convolution using bilinearly sampled input features."""
 
     def __init__(self, inc, outc, num_param, stride=1, bias=None):
-        super().__init__()
+        super(AKConv, self).__init__()
         self.num_param = num_param
         self.stride = stride
         self.conv = nn.Sequential(
@@ -824,77 +824,117 @@ class AKConv(nn.Module):
         self.p_conv = nn.Conv2d(inc, 2 * num_param, kernel_size=3, padding=1, stride=stride)
         nn.init.zeros_(self.p_conv.weight)
         self.p_conv.register_full_backward_hook(self._set_lr)
+        self.register_buffer("p_n", self._get_p_n(N=self.num_param))
 
     @staticmethod
     def _set_lr(module, grad_input, grad_output):
-        """Scale offset convolution gradients."""
-        return tuple(g * 0.1 if g is not None else None for g in grad_input)
+        grad_input = (grad_input[i] * 0.1 for i in range(len(grad_input)))
+        grad_output = (grad_output[i] * 0.1 for i in range(len(grad_output)))
 
     def forward(self, x):
+        # N is num_param.
         offset = self.p_conv(x)
-        n, h, w = self.num_param, *offset.shape[-2:]
-        p = self._get_p(offset).permute(0, 2, 3, 1)
-        p_x, p_y = p[..., :n], p[..., n:]
+        dtype = offset.data.type()
+        N = offset.size(1) // 2
+        # (b, 2N, h, w)
+        p = self._get_p(offset, dtype)
 
-        q_lt = torch.cat((p_x.detach().floor(), p_y.detach().floor()), dim=-1)
+        # (b, h, w, 2N)
+        p = p.contiguous().permute(0, 2, 3, 1)
+        q_lt = p.detach().floor()
         q_rb = q_lt + 1
-        q_lt = torch.cat((q_lt[..., :n].clamp(0, x.shape[2] - 1), q_lt[..., n:].clamp(0, x.shape[3] - 1)), dim=-1).long()
-        q_rb = torch.cat((q_rb[..., :n].clamp(0, x.shape[2] - 1), q_rb[..., n:].clamp(0, x.shape[3] - 1)), dim=-1).long()
-        q_lb = torch.cat((q_lt[..., :n], q_rb[..., n:]), dim=-1)
-        q_rt = torch.cat((q_rb[..., :n], q_lt[..., n:]), dim=-1)
-        p = torch.cat((p_x.clamp(0, x.shape[2] - 1), p_y.clamp(0, x.shape[3] - 1)), dim=-1)
-        p_x, p_y = p[..., :n], p[..., n:]
 
-        def weight(q, sign_x, sign_y):
-            q_x, q_y = q[..., :n].to(p.dtype), q[..., n:].to(p.dtype)
-            return (1 + sign_x * (q_x - p_x)) * (1 + sign_y * (q_y - p_y))
+        q_lt = torch.cat([torch.clamp(q_lt[..., :N], 0, x.size(2) - 1), torch.clamp(q_lt[..., N:], 0, x.size(3) - 1)],
+                         dim=-1).long()
+        q_rb = torch.cat([torch.clamp(q_rb[..., :N], 0, x.size(2) - 1), torch.clamp(q_rb[..., N:], 0, x.size(3) - 1)],
+                         dim=-1).long()
+        q_lb = torch.cat([q_lt[..., :N], q_rb[..., N:]], dim=-1)
+        q_rt = torch.cat([q_rb[..., :N], q_lt[..., N:]], dim=-1)
 
-        x_offset = (
-            weight(q_lt, 1, 1).unsqueeze(1) * self._get_x_q(x, q_lt, n)
-            + weight(q_rb, -1, -1).unsqueeze(1) * self._get_x_q(x, q_rb, n)
-            + weight(q_lb, 1, -1).unsqueeze(1) * self._get_x_q(x, q_lb, n)
-            + weight(q_rt, -1, 1).unsqueeze(1) * self._get_x_q(x, q_rt, n)
+        # clip p
+        p = torch.cat([torch.clamp(p[..., :N], 0, x.size(2) - 1), torch.clamp(p[..., N:], 0, x.size(3) - 1)], dim=-1)
+
+        # bilinear kernel (b, h, w, N)
+        g_lt = (1 + (q_lt[..., :N].type_as(p) - p[..., :N])) * (1 + (q_lt[..., N:].type_as(p) - p[..., N:]))
+        g_rb = (1 - (q_rb[..., :N].type_as(p) - p[..., :N])) * (1 - (q_rb[..., N:].type_as(p) - p[..., N:]))
+        g_lb = (1 + (q_lb[..., :N].type_as(p) - p[..., :N])) * (1 - (q_lb[..., N:].type_as(p) - p[..., N:]))
+        g_rt = (1 - (q_rt[..., :N].type_as(p) - p[..., :N])) * (1 + (q_rt[..., N:].type_as(p) - p[..., N:]))
+
+        # resampling the features based on the modified coordinates.
+        x_q_lt = self._get_x_q(x, q_lt, N)
+        x_q_rb = self._get_x_q(x, q_rb, N)
+        x_q_lb = self._get_x_q(x, q_lb, N)
+        x_q_rt = self._get_x_q(x, q_rt, N)
+
+        # bilinear
+        x_offset = g_lt.unsqueeze(dim=1) * x_q_lt + \
+                   g_rb.unsqueeze(dim=1) * x_q_rb + \
+                   g_lb.unsqueeze(dim=1) * x_q_lb + \
+                   g_rt.unsqueeze(dim=1) * x_q_rt
+
+        x_offset = self._reshape_x_offset(x_offset, self.num_param)
+        out = self.conv(x_offset)
+
+        return out
+
+    # generating the inital sampled shapes for the AKConv with different sizes.
+    def _get_p_n(self, N):
+        base_int = round(math.sqrt(self.num_param))
+        row_number = self.num_param // base_int
+        mod_number = self.num_param % base_int
+        p_n_x, p_n_y = torch.meshgrid(
+            torch.arange(0, row_number),
+            torch.arange(0, base_int))
+        p_n_x = torch.flatten(p_n_x)
+        p_n_y = torch.flatten(p_n_y)
+        if mod_number > 0:
+            mod_p_n_x, mod_p_n_y = torch.meshgrid(
+                torch.arange(row_number, row_number + 1),
+                torch.arange(0, mod_number))
+
+            mod_p_n_x = torch.flatten(mod_p_n_x)
+            mod_p_n_y = torch.flatten(mod_p_n_y)
+            p_n_x, p_n_y = torch.cat((p_n_x, mod_p_n_x)), torch.cat((p_n_y, mod_p_n_y))
+        p_n = torch.cat([p_n_x, p_n_y], 0)
+        p_n = p_n.view(1, 2 * N, 1, 1)
+        return p_n
+
+    # no zero-padding
+    def _get_p_0(self, h, w, N, dtype):
+        p_0_x, p_0_y = torch.meshgrid(
+            torch.arange(0, h * self.stride, self.stride),
+            torch.arange(0, w * self.stride, self.stride),
+            indexing="ij",
         )
-        return self.conv(self._reshape_x_offset(x_offset))
+        p_0_x = p_0_x.type(dtype).view(1, 1, h, w).expand(1, N, h, w)
+        p_0_y = p_0_y.type(dtype).view(1, 1, h, w).expand(1, N, h, w)
+        return torch.cat((p_0_x, p_0_y), dim=1)
 
-    def _get_p_n(self, device, dtype):
-        n = self.num_param
-        base = round(math.sqrt(n))
-        rows, remainder = divmod(n, base)
-        y, x = torch.meshgrid(
-            torch.arange(rows, device=device), torch.arange(base, device=device), indexing="ij"
-        )
-        p_x, p_y = y.flatten(), x.flatten()
-        if remainder:
-            y, x = torch.meshgrid(
-                torch.arange(rows, rows + 1, device=device),
-                torch.arange(remainder, device=device), indexing="ij"
-            )
-            p_x, p_y = torch.cat((p_x, y.flatten())), torch.cat((p_y, x.flatten()))
-        return torch.cat((p_x, p_y)).to(dtype=dtype).view(1, 2 * n, 1, 1)
+    def _get_p(self, offset, dtype):
+        N, h, w = offset.size(1) // 2, offset.size(2), offset.size(3)
 
-    def _get_p_0(self, h, w, device, dtype):
-        y, x = torch.meshgrid(
-            torch.arange(h, device=device) * self.stride,
-            torch.arange(w, device=device) * self.stride, indexing="ij"
-        )
-        y = y.to(dtype=dtype).view(1, 1, h, w).expand(1, self.num_param, h, w)
-        x = x.to(dtype=dtype).view(1, 1, h, w).expand(1, self.num_param, h, w)
-        return torch.cat((y, x), dim=1)
+        # (1, 2N, 1, 1)
+        # p_n = self._get_p_n(N, dtype)
+        # (1, 2N, h, w)
+        p_0 = self._get_p_0(h, w, N, dtype)
+        p = p_0 + self.p_n + offset
+        return p
 
-    def _get_p(self, offset):
-        _, _, h, w = offset.shape
-        return self._get_p_0(h, w, offset.device, offset.dtype) + self._get_p_n(offset.device, offset.dtype) + offset
-
-    @staticmethod
-    def _get_x_q(x, q, n):
+    def _get_x_q(self, x, q, N):
         b, h, w, _ = q.shape
         c, input_w = x.shape[1], x.shape[3]
-        index = (q[..., :n] * input_w + q[..., n:]).reshape(b, 1, h * w * n)
+        index = (q[..., :N] * input_w + q[..., N:]).reshape(b, 1, h * w * N)
         index = index.expand(-1, c, -1)
-        return x.flatten(2).gather(2, index).reshape(b, c, h, w, n)
+        return x.flatten(2).gather(dim=-1, index=index).reshape(b, c, h, w, N)
 
     @staticmethod
-    def _reshape_x_offset(x_offset):
+    def _reshape_x_offset(x_offset, num_param):
         b, c, h, w, n = x_offset.shape
+        # using Conv3d
+        # x_offset = x_offset.permute(0,1,4,2,3), then Conv3d(c,c_out, kernel_size =(num_param,1,1),stride=(num_param,1,1),bias= False)
+        # using 1 × 1 Conv
+        # x_offset = x_offset.permute(0,1,4,2,3), then, x_offset.view(b,c×num_param,h,w)  finally, Conv2d(c×num_param,c_out, kernel_size =1,stride=1,bias= False)
+        # using the column conv as follow， then, Conv2d(inc, outc, kernel_size=(num_param, 1), stride=(num_param, 1), bias=bias)
+
+        # x_offset = einops.rearrange(x_offset, 'b c h w n -> b c (h n) w')
         return x_offset.permute(0, 1, 2, 4, 3).reshape(b, c, h * n, w)

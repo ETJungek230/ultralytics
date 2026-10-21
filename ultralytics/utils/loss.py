@@ -837,6 +837,41 @@ class v8PoseLoss(v8DetectionLoss):
         return kpts_loss, kpts_obj_loss
 
 
+class ArcFaceLoss(nn.Module):
+    """ArcFace angular-margin loss over foreground classification features."""
+
+    def __init__(self, scale: float = 30.0, margin: float = 0.5):
+        super().__init__()
+        self.scale = scale
+        self.margin = margin
+
+    def forward(self, cosine: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        if cosine.shape[-1] < 2:
+            return cosine.sum() * 0
+        cosine = cosine.float().clamp(-1 + 1e-7, 1 - 1e-7)
+        sine = torch.sqrt((1.0 - cosine.square()).clamp_min(1e-7))
+        phi = cosine * math.cos(self.margin) - sine * math.sin(self.margin)
+        threshold = math.cos(math.pi - self.margin)
+        margin_correction = math.sin(math.pi - self.margin) * self.margin
+        phi = torch.where(cosine > threshold, phi, cosine - margin_correction)
+        one_hot = F.one_hot(labels.long(), num_classes=cosine.shape[-1]).to(dtype=cosine.dtype)
+        logits = (one_hot * phi + (1.0 - one_hot) * cosine) * self.scale
+        return F.cross_entropy(logits, labels.long())
+
+    # Temporarily disabled ArcFace background-negative objective; retained for later restoration.
+    # def background_loss(self, cosine: torch.Tensor) -> torch.Tensor:
+    #     """Classify unassigned anchors as background against a fixed zero-logit background class."""
+    #     if not cosine.numel():
+    #         return cosine.sum() * 0
+    #     cosine = cosine.float()
+    #     background_logit = torch.zeros_like(cosine[..., :1])
+    #     logits = torch.cat((cosine, background_logit), dim=-1) * self.scale
+    #     background_labels = torch.full(
+    #         cosine.shape[:-1], cosine.shape[-1], device=cosine.device, dtype=torch.long
+    #     )
+    #     return F.cross_entropy(logits.reshape(-1, logits.shape[-1]), background_labels.reshape(-1))
+
+
 class PoseLoss26(v8PoseLoss):
     """Criterion class for computing training losses for YOLO26 pose estimation with RLE loss support."""
 
@@ -1022,6 +1057,66 @@ class PoseLoss26(v8PoseLoss):
                 kpts_obj_loss = self.bce_pose(pred_kpt[..., 2], kpt_mask.float())  # keypoint obj loss
 
         return kpts_loss, kpts_obj_loss, rle_loss
+
+
+class PoseLossAf(PoseLoss26):
+    """PoseLoss26 with native BCE plus foreground and background ArcFace objectives."""
+
+    arcface_scale = 8.0
+    arcface_margin = 0.30
+    # arcface_negative_gain = 0.1  # Reserved for the disabled background-negative objective.
+    arcface_gain = 0.1
+
+    def __init__(self, model: torch.nn.Module, tal_topk: int = 10, tal_topk2: int | None = None):
+        super().__init__(model, tal_topk, tal_topk2)
+        head = model.model[-1]
+        self.arcface_loss = ArcFaceLoss(
+            scale=self.arcface_scale,
+            margin=self.arcface_margin,
+        ).to(self.device)
+        self.cosine_scale = head.cosine_scale
+        self.arcface_gain = getattr(self.hyp, "arcface", 0.1)
+        # self._arcface_negative_loss = None  # Reserved for the disabled background-negative objective.
+        self._arcface_assignment = None
+
+    def get_assigned_targets_and_loss(self, preds: dict[str, torch.Tensor], batch: dict[str, Any]) -> tuple:
+        result = super().get_assigned_targets_and_loss(preds, batch)
+        self._arcface_assignment = result[0]
+        # ArcFace background-negative objective, disabled for now:
+        # fg_mask = result[0][0]
+        # background_cosine = preds["scores"].permute(0, 2, 1)[~fg_mask] / self.cosine_scale
+        # self._arcface_negative_loss = self.arcface_loss.background_loss(background_cosine)
+        return result
+
+    def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) \
+            -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        loss, loss_items = super().loss(preds, batch)
+        fg_mask, target_gt_idx = self._arcface_assignment[:2]
+        batch_size = preds["scores"].shape[0]
+        if fg_mask.any():
+            imgsz = torch.tensor(preds["feats"][0].shape[2:], device=self.device, dtype=preds["scores"].dtype)
+            imgsz = imgsz * self.stride[0]
+            targets = torch.cat((batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1), batch["bboxes"]), 1)
+            targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
+            gt_labels = targets[..., 0].long()
+            batch_indices = torch.arange(batch_size, device=self.device)[:, None].expand_as(target_gt_idx)
+            labels = gt_labels[batch_indices, target_gt_idx][fg_mask]
+            cosine = preds["scores"].permute(0, 2, 1)[fg_mask] / self.cosine_scale
+            arcface = self.arcface_loss(cosine, labels)
+        else:
+            # Keep the cv3 cosine classifier connected to the graph when no anchors are foreground.
+            arcface = preds["scores"].sum() * 0
+        arcface = arcface * self.arcface_gain
+        loss_items["af_loss"] = arcface.detach()
+        # ArcFace background-negative objective, disabled for now:
+        # arcface_negative = self._arcface_negative_loss
+        # if arcface_negative is None:
+        #     arcface_negative = preds["scores"].sum() * 0
+        # arcface_negative = arcface_negative * self.arcface_negative_gain * self.hyp.cls
+        # loss_items["af_n_loss"] = arcface_negative.detach()
+        # Retain native cv3 BCE cls supervision and add foreground ArcFace only.
+        loss[3] += arcface * batch_size
+        return loss, loss_items
 
 
 class v8ClassificationLoss:
