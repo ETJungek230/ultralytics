@@ -65,7 +65,7 @@ Every new account receives free credits for cloud GPU training:
 
 !!! tip "Maximize Your Credits"
 
-    Sign up with a work email to receive $25 in credits. If you signed up with a personal email, you can verify a work email later to unlock the additional $20 in credits.
+    Sign up with a work email to receive $25 in credits. If you signed up with a personal email, you can change your account email to a work email later to unlock the additional $20 in credits.
 
 ### Complete Your Profile
 
@@ -436,4 +436,4 @@ Yes. Use the **Local Training** tab in the training dialog to copy a ready-made 
 
 ### How do I use a trained model outside Platform?
 
-Download the `best.pt` weights from the model page, [export](train/models.md#export-model) to formats such as ONNX, TensorRT, or CoreML, or call the model through a [dedicated endpoint](deploy/endpoints.md). You can also load it directly with `YOLO("ul://username/project/model")` in the `ultralytics` package.
+Download the PyTorch weights (`{model}.pt`, the best checkpoint) from the model page, [export](train/models.md#export-model) to formats such as ONNX, TensorRT, or CoreML, or call the model through a [dedicated endpoint](deploy/endpoints.md). You can also load it directly with `YOLO("ul://username/project/model")` in the `ultralytics` package.
