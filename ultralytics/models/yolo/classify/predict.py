@@ -58,15 +58,20 @@ class ClassificationPredictor(BasePredictor):
 
         super().setup_source(source)
         transforms = getattr(self.model.model, "transforms", None)  # missing on YAML-built and legacy checkpoints
-        size = getattr(transforms.transforms[0], "size", max(self.imgsz)) if transforms is not None else None
+        size = getattr(transforms.transforms[0], "size", self.imgsz) if transforms is not None else None
+        size = (size, size) if isinstance(size, int) else size
         if hasattr(self.model.model, "yaml"):
             self.ch = self.model.model.yaml.get("channels", 3)
         if self.ch == 3:
             self.transforms = (
-                transforms if size == max(self.imgsz) and self.model.format == "pt" else classify_transforms(self.imgsz)
+                transforms
+                if size is not None and tuple(size) == tuple(self.imgsz) and self.model.format == "pt"
+                else classify_transforms(self.imgsz)
             )
         else:
             self.transforms = classify_transforms(self.imgsz, mean=[0] * self.ch, std=[1] * self.ch)
+
+
         tfl = getattr(self.transforms, "transforms", ())
         split = (
             type(self.transforms) is T.Compose
@@ -111,7 +116,8 @@ class ClassificationPredictor(BasePredictor):
         if not isinstance(orig_imgs, list):  # Input images are a torch.Tensor, not a list
             orig_imgs = ops.convert_torch2numpy_batch(orig_imgs)[..., ::-1]
 
-        preds = preds[0] if isinstance(preds, (list, tuple)) else preds
+        # Snapshot reused backend output buffers before the next inference.
+        preds = (preds[0] if isinstance(preds, (list, tuple)) else preds).clone()
         return [
             Results(orig_img, path=img_path, names=self.model.names, probs=pred)
             for pred, orig_img, img_path in zip(preds, orig_imgs, self.batch[0])

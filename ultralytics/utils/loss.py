@@ -15,6 +15,7 @@ from ultralytics.utils.ops import crop_mask, xywh2xyxy, xyxy2xywh
 from ultralytics.utils.tal import (
     PoseTaskAlignedAssigner,
     RotatedTaskAlignedAssigner,
+    SegTaskAlignedAssigner,
     TaskAlignedAssigner,
     dist2bbox,
     dist2rbox,
@@ -732,6 +733,37 @@ class TinyPoseMSELoss:
         return loss, {"heatmap_loss": loss.detach()}
 
 
+class SegmentLoss26(v8SegmentationLoss):
+    """Criterion class for YOLO26 segmentation, whose task-aligned assignment also scores each predicted mask."""
+
+    def __init__(self, model: torch.nn.Module, tal_topk: int = 10, tal_topk2: int | None = None):
+        """Initialize the segmentation loss with the mask-aware SegTaskAlignedAssigner; model must be de-paralleled."""
+        super().__init__(model, tal_topk, tal_topk2)
+        args = {k: getattr(self.assigner, k) for k in ("topk", "topk2", "num_classes", "alpha", "beta", "stride")}
+        self.assigner = SegTaskAlignedAssigner(**args)
+
+    def get_assigned_targets_and_loss(self, preds: dict[str, torch.Tensor], batch: dict[str, Any]) -> tuple:
+        """Assign with mask coefficients, prototype-pixel scales, prototypes and per-object ground-truth masks."""
+        batch_idx = batch["batch_idx"].view(-1).long().to(self.device)
+        proto = (preds["proto"][0] if isinstance(preds["proto"], tuple) else preds["proto"]).detach()
+        bs, _, mh, mw = proto.shape
+        n = torch.bincount(batch_idx, minlength=bs)
+        masks = batch["masks"].to(self.device)
+        if masks.numel() and masks.shape[-2:] != (mh, mw):
+            masks = F.interpolate(masks[None].float(), (mh, mw), mode="nearest")[0]
+        if self.overlap:  # (bs, h, w) where i + 1 marks each image's i-th object
+            gt_masks = masks[:, None] == torch.arange(1, int(n.max()) + 1, device=self.device)[:, None, None]
+        else:  # (n_objects, h, w) in batch order, padded into per-image slots as in preprocess()
+            gt_masks = masks.new_zeros(bs, int(n.max()), *masks.shape[1:])
+            gt_masks[batch_idx, torch.arange(len(batch_idx), device=self.device) - (n.cumsum(0) - n)[batch_idx]] = masks
+            gt_masks = gt_masks > 0.5
+        mask_scale = (mh / (preds["feats"][0].shape[2] * self.stride[0])).expand(bs, 1)
+        pd_coef = preds["mask_coefficient"].detach().permute(0, 2, 1)
+        return super().get_assigned_targets_and_loss(
+            preds, batch, pd_coef=pd_coef, mask_scale=mask_scale, proto=proto, gt_masks=gt_masks
+        )
+
+
 class v8PoseLoss(v8DetectionLoss):
     """Criterion class for computing training losses for YOLOv8 pose estimation."""
 
@@ -941,7 +973,11 @@ class PoseLoss26(v8PoseLoss):
         pred_kpts = self.kpts_decode(anchor_points, pred_kpts)
         gt_kpts = self._batch_keypoints(batch, batch_size, imgsz)
         (fg_mask, target_gt_idx, target_bboxes, _, _), det_loss, _ = self.get_assigned_targets_and_loss(
-            preds, batch, pd_kpts=pred_kpts.detach()[..., :2] * stride_tensor[:, None], gt_kpts=gt_kpts
+            preds,
+            batch,
+            pd_kpts=pred_kpts.detach()[..., :2] * stride_tensor[:, None],
+            gt_kpts=gt_kpts,
+            anc_strides=stride_tensor.view(-1),
         )
         loss[0], loss[3], loss[4] = det_loss[0], det_loss[1], det_loss[2]
 

@@ -113,6 +113,7 @@ from ultralytics.utils.loss import (
     PoseLossSoftmax,
     PoseLossTversky,
     TinyPoseMSELoss,
+    SegmentLoss26,
     SemanticSegmentationLoss,
     v8ClassificationLoss,
     v8DetectionLoss,
@@ -275,7 +276,7 @@ class BaseModel(torch.nn.Module):
             for m in self.model.modules():
                 if isinstance(m, skip):
                     continue
-                if isinstance(m, (Conv, Conv2)) and hasattr(m, "bn"):
+                if isinstance(m, (Conv, Conv2, DWConv)) and hasattr(m, "bn"):
                     if isinstance(m, Conv2):
                         m.fuse_convs()
                     m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
@@ -797,11 +798,8 @@ class SegmentationModel(DetectionModel):
 
     def init_criterion(self):
         """Initialize the loss criterion for the SegmentationModel."""
-        return (
-            E2ELoss(self, v8SegmentationLoss)
-            if getattr(self.model[-1], "one2one_cv2", None) is not None
-            else v8SegmentationLoss(self)
-        )
+        loss = SegmentLoss26 if isinstance(self.model[-1], Segment26) else v8SegmentationLoss
+        return E2ELoss(self, loss) if getattr(self.model[-1], "one2one_cv2", None) is not None else loss(self)
 
 
 class SemanticSegmentationModel(BaseModel):
@@ -1522,7 +1520,12 @@ class YOLOEModel(DetectionModel):
             "Prompt-free model does not support setting classes. Please try with Text/Visual prompt models."
         )
         assert embeddings.ndim == 3
-        self.names = check_class_names(names)  # validate before any state is written
+        names = check_class_names(names)  # validate before any state is written
+        if self.model[-1].is_fused:  # validators drop "/" synonyms
+            assert {i: n.split("/", 1)[0] for i, n in names.items()} == {
+                i: n.split("/", 1)[0] for i, n in self.names.items()
+            }, "Class embeddings are fused; use an unfused YOLOE model to change classes."
+        self.names = names
         self.pe = embeddings
         self.model[-1].nc = len(names)
 
