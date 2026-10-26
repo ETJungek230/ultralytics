@@ -64,8 +64,11 @@ from ultralytics.nn.modules import (
     Index,
     LRPCHead,
     Pose,
+    PoseAttn,
     Pose26,
     PoseAf,
+    PoseCus,
+    PoseTversky,
     RepC3,
     RepConv,
     RepNCSPELAN4,
@@ -83,7 +86,13 @@ from ultralytics.nn.modules import (
     YOLOESegment26,
     v10Detect,
     MultiClassify,
+    DetectPico,
+    PosePico,
+    LiteHRNetWiderNaive,
+    TinyPoseHeatmap,
+    TensorAdd, SplitChannels,
 )
+from ultralytics.nn.modules.ppdet import LCNetBlock
 from ultralytics.utils import (
     DEFAULT_CFG_DICT,
     LOGGER,
@@ -101,6 +110,9 @@ from ultralytics.utils.loss import (
     E2ELoss,
     PoseLoss26,
     PoseLossAf,
+    PoseLossSoftmax,
+    PoseLossTversky,
+    TinyPoseMSELoss,
     SemanticSegmentationLoss,
     v8ClassificationLoss,
     v8DetectionLoss,
@@ -343,14 +355,14 @@ class BaseModel(torch.nn.Module):
         model = (weights.get("ema") or weights["model"]) if isinstance(weights, dict) else weights  # ema first
         csd = model.float().state_dict()  # checkpoint state_dict as FP32
         # Detect cls branch width (c3) depends on nc. Rebuild compatible same-layout branches at source width,
-        # while keeping the destination classifier type (Conv2d or PoseCus _CosineClassifier).
+        # while preserving custom destination classifiers such as the Tversky projection.
         head, src_head = self.model[-1], getattr(model, "model", [None])[-1]
 
         def _cls_in_channels(layer):
-            return getattr(layer, "in_channels", layer.weight.shape[1])
+            return layer.in_channels if hasattr(layer, "in_channels") else layer.weight.shape[1]
 
         def _cls_out_channels(layer):
-            return getattr(layer, "out_channels", layer.weight.shape[0])
+            return layer.out_channels if hasattr(layer, "out_channels") else layer.weight.shape[0]
 
         def _new_cls_layer_like(layer, in_channels, out_channels):
             if isinstance(layer, nn.Conv2d):
@@ -379,8 +391,10 @@ class BaseModel(torch.nn.Module):
                 dst, src = getattr(head, attr, None), getattr(src_head, attr, None)
                 if dst is None or src is None or len(dst) != len(src):
                     continue
+                if any(type(d[-1]).__name__ == "_TverskyProjection2d" for d in dst):
+                    continue  # Preserve custom Tversky classifiers; compatible state_dict keys load below.
                 if any(len(d) != len(s) for d, s in zip(dst, src)):
-                    continue  # Different branch layouts (e.g. Detect vs PoseCus) load their shared state keys below.
+                    continue  # Different branch layouts (e.g. Detect vs PoseSoftmax) load their shared state keys below.
                 if not any(_cls_in_channels(d[-1]) != _cls_in_channels(s[-1]) for d, s in zip(dst, src)):
                     continue
                 src = deepcopy(src)
@@ -902,8 +916,16 @@ class PoseModel(DetectionModel):
     def init_criterion(self):
         """Initialize the loss criterion for the PoseModel."""
         head = self.model[-1]
-        if isinstance(head, PoseAf):
+        if isinstance(head, TinyPoseHeatmap):
+            return TinyPoseMSELoss(self)
+        elif isinstance(head, PoseTversky):
+            loss = PoseLossTversky
+        # elif isinstance(head, PoseCus):
+        #     loss = PoseLossSoftmax
+        elif isinstance(head, PoseAf):
             loss = PoseLossAf
+        elif isinstance(head, PosePico):
+            loss = PoseLoss26
         elif isinstance(head, Pose26):
             loss = PoseLoss26
         else:
@@ -2220,6 +2242,7 @@ def parse_model(d, ch, verbose=True):
             C2fCIB,
             A2C2f,
             MultiClassify,
+            LCNetBlock,
         }
     )
     repeat_modules = frozenset(  # modules with 'repeat' arguments
@@ -2286,6 +2309,8 @@ def parse_model(d, ch, verbose=True):
                     args.extend((True, 1.2))
             if m is C2fCIB:
                 legacy_inferred = False
+            if m is LCNetBlock:
+                pass  # nothing else to do
         elif m is AIFI:
             args = [ch[f], *args]
         elif m in frozenset({HGStem, HGBlock}):
@@ -2296,22 +2321,51 @@ def parse_model(d, ch, verbose=True):
                 n = 1
         elif m is ResNetLayer:
             c2 = args[1] if args[3] else args[1] * 4
+        elif m is LiteHRNetWiderNaive:
+            args = [ch[f], *args]
+            c2 = args[1]
+        elif m is TinyPoseHeatmap:
+            args = [ch[f], *args]
+            c2 = args[1]
         elif m is torch.nn.BatchNorm2d:
             args = [ch[f]]
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
+        elif m is TensorAdd:
+            c2 = ch[f[0]]
+            if not all(ch[x] == c2 for x in f):
+                raise ValueError(f"Add requires equal channels, got {[ch[x] for x in f]}")
+            args = []
+        elif m is SplitChannels:
+            # SplitChannels 不接收 c1、c2 参数
+            chunks = args[0] if args else 2
+
+            # 保存输出通道数，供后续 Index 使用
+            c1 = ch[f]
+            assert c1 % chunks == 0, (
+                f"SplitChannels: input channels {c1} "
+                f"must be divisible by chunks={chunks}"
+            )
+
+            c2 = [c1 // chunks] * chunks
+            args = [chunks]
         elif m in frozenset(
             {
                 Detect,
                 WorldDetect,
                 YOLOEDetect,
+                DetectPico,
                 Segment,
                 Segment26,
                 YOLOESegment,
                 YOLOESegment26,
                 Pose,
                 Pose26,
+                PosePico,
+                PoseAttn,
                 PoseAf,
+                PoseCus,
+                PoseTversky,
                 OBB,
                 OBB26,
             }
@@ -2321,7 +2375,7 @@ def parse_model(d, ch, verbose=True):
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
             if m in {Detect, YOLOEDetect,
                      Segment, Segment26, YOLOESegment, YOLOESegment26,
-                     Pose, Pose26, PoseAf,
+                     Pose, Pose26, PosePico, PoseAttn, PoseAf, PoseCus, PoseTversky,
                      OBB, OBB26}:
                 m.legacy = legacy_inferred if legacy_override is None else legacy_override
         elif m is Depth:
@@ -2418,13 +2472,13 @@ def guess_model_task(model):
         m = cfg["head"][-1][-2].lower()  # output module name
         if m in {"classify", "classifier", "cls", "fc", "multiclassify"}:
             return "classify"
-        if "detect" in m:
+        if "detect" in m or "picodet" in m:
             return "detect"
         if "semanticsegment" in m:
             return "semantic"
         if "segment" in m:
             return "segment"
-        if "pose" in m:
+        if "pose" in m or 'picopose' in m:
             return "pose"
         if "obb" in m:
             return "obb"

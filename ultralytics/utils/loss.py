@@ -419,6 +419,15 @@ class v8DetectionLoss:
             # pred_dist = (pred_dist.view(b, a, c // 4, 4).softmax(2) * self.proj.type(pred_dist.dtype).view(1, 1, -1, 1)).sum(2)
         return dist2bbox(pred_dist, anchor_points, xywh=False)
 
+    def classification_loss(
+        self, pred_scores: torch.Tensor, target_scores: torch.Tensor, target_scores_sum: torch.Tensor
+    ) -> torch.Tensor:
+        """Compute the task-aligned BCE classification loss."""
+        bce_loss = self.bce(pred_scores, target_scores.to(pred_scores.dtype))
+        if self.class_weights is not None:
+            bce_loss *= self.class_weights
+        return bce_loss.sum() / target_scores_sum
+
     def get_assigned_targets_and_loss(
         self, preds: dict[str, torch.Tensor], batch: dict[str, Any], **assign_kwargs
     ) -> tuple:
@@ -460,11 +469,9 @@ class v8DetectionLoss:
 
         target_scores_sum = target_scores.sum().clamp_(min=1)  # on the device: no host sync
 
-        # Cls loss with optional class weighting
-        bce_loss = self.bce(pred_scores, target_scores.to(dtype))  # (bs, num_anchors, nc)
-        if self.class_weights is not None:
-            bce_loss *= self.class_weights
-        loss[1] = bce_loss.sum() / target_scores_sum  # BCE
+        loss[1] = self.classification_loss(pred_scores, target_scores, target_scores_sum)
+        if loss[1].isnan():
+            pass
 
         # Bbox loss: zero on an empty foreground, and pred_distri stays in the graph either way
         loss[0], loss[2] = self.bbox_loss(
@@ -674,6 +681,55 @@ class v8SegmentationLoss(v8DetectionLoss):
                 loss += (proto * 0).sum() + (pred_masks * 0).sum()  # inf sums may lead to nan loss
 
         return loss / fg_mask.sum()
+
+
+class TinyPoseMSELoss:
+    """Gaussian heatmap MSE for top-down TinyPose outputs.
+
+    The criterion accepts precomputed ``batch['heatmaps']`` or Ultralytics-format normalized keypoints
+    in ``batch['keypoints']`` plus ``batch['batch_idx']``. One person crop per image is the intended data format.
+    """
+
+    loss_names = ("heatmap_loss",)
+
+    def __init__(self, model: nn.Module, sigma: float = 2.0):
+        self.num_joints = model.model[-1].num_joints
+        self.sigma = sigma
+
+    def __call__(self, preds: torch.Tensor, batch: dict[str, torch.Tensor]):
+        if preds.ndim != 4 or preds.shape[1] != self.num_joints:
+            raise ValueError(f"TinyPose expects Bx{self.num_joints}xHxW heatmaps, got {tuple(preds.shape)}")
+        target = batch.get("heatmaps")
+        visible = None
+        if target is None:
+            points = batch.get("keypoints")
+            if points is None:
+                raise KeyError("TinyPose training requires batch['heatmaps'] or batch['keypoints']")
+            b, k, h, w = preds.shape
+            target = preds.new_zeros((b, k, h, w))
+            visible = preds.new_zeros((b, k))
+            batch_idx = batch.get("batch_idx", torch.zeros(len(points), device=points.device)).long().view(-1)
+            yy, xx = torch.meshgrid(
+                torch.arange(h, device=preds.device, dtype=preds.dtype),
+                torch.arange(w, device=preds.device, dtype=preds.dtype),
+                indexing="ij",
+            )
+            for person, image_id in zip(points, batch_idx):
+                xy = person[:, :2].to(device=preds.device, dtype=preds.dtype)
+                valid = person[:, 2].to(device=preds.device) > 0 if person.shape[-1] > 2 else torch.ones(k, device=preds.device, dtype=torch.bool)
+                cx = xy[:, 0] * w
+                cy = xy[:, 1] * h
+                heat = torch.exp(-((xx[None] - cx[:, None, None]) ** 2 + (yy[None] - cy[:, None, None]) ** 2) / (2 * self.sigma**2))
+                target[image_id] = torch.maximum(target[image_id], heat * valid[:, None, None])
+                visible[image_id] = torch.maximum(visible[image_id], valid.to(visible.dtype))
+        else:
+            target = target.to(device=preds.device, dtype=preds.dtype)
+            if target.shape != preds.shape:
+                raise ValueError(f"TinyPose target heatmaps must match predictions: {target.shape} != {preds.shape}")
+            visible = (target.flatten(2).amax(-1) > 0).to(preds.dtype)
+        per_joint = (preds - target).square().mean(dim=(-1, -2))
+        loss = (per_joint * visible).sum() / visible.sum().clamp_min(1)
+        return loss, {"heatmap_loss": loss.detach()}
 
 
 class v8PoseLoss(v8DetectionLoss):
@@ -1075,6 +1131,37 @@ class PoseLossAf(PoseLoss26):
         # Retain native cv3 BCE cls supervision and add foreground ArcFace only.
         loss[3] += arcface * batch_size
         return loss, loss_items
+
+
+class PoseLossSoftmax(PoseLoss26):
+    """Pose26 criterion using softmax cross-entropy with an explicit background class."""
+
+    def classification_loss(
+            self, pred_scores: torch.Tensor, target_scores: torch.Tensor, target_scores_sum: torch.Tensor
+    ) -> torch.Tensor:
+        """Train assigned anchors against soft class targets and unassigned anchors as background."""
+        pred_scores = pred_scores.float()
+        target_scores = target_scores.float()
+        quality = target_scores.sum(-1)
+        foreground = quality > 0
+
+        # Task-aligned scores are soft class targets; add a zero-logit background class for unmatched anchors.
+        class_targets = target_scores / quality.unsqueeze(-1).clamp_min(1e-9)
+        background_target = (~foreground).unsqueeze(-1).to(dtype=pred_scores.dtype)
+        target_probs = torch.cat((class_targets, background_target), dim=-1)
+        logits = torch.cat((pred_scores, torch.zeros_like(pred_scores[..., :1])), dim=-1)
+        per_anchor = -(target_probs * F.log_softmax(logits.float(), dim=-1)).sum(-1)
+
+        # Preserve task-aligned quality weighting on foreground anchors and supervise unmatched anchors as background.
+        anchor_weights = torch.where(foreground, quality, torch.ones_like(quality))
+        if self.class_weights is not None:
+            positive_weights = (class_targets * self.class_weights).sum(-1)
+            anchor_weights *= torch.where(foreground, positive_weights, torch.ones_like(quality))
+        return (per_anchor * anchor_weights).sum() / target_scores_sum.float()
+
+
+class PoseLossTversky(PoseLossSoftmax):
+    """Pose26 criterion using softmax cross-entropy for Tversky class similarities."""
 
 
 class v8ClassificationLoss:

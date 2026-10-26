@@ -18,8 +18,8 @@ from ultralytics.utils.torch_utils import TORCH_1_11, fuse_conv_and_bn, smart_in
 from .block import DFL, SAVPE, BNContrastiveHead, ContrastiveHead, Proto, Proto26, RealNVP, Residual, SwiGLUFFN
 from .conv import Conv, DWConv
 from .transformer import MLP, DeformableTransformerDecoder, DeformableTransformerDecoderLayer
+from .tversky import TverskyProjection
 from .utils import bias_init_with_prob
-from .attention import SE, ECA
 
 __all__ = (
     "OBB",
@@ -27,7 +27,13 @@ __all__ = (
     "Depth",
     "MultiClassify",
     "Detect",
+    "DetectPico",
     "Pose",
+    "PosePico",
+    "PoseCus",
+    "PoseAttn",
+    "PoseAf",
+    "PoseTversky",
     "RTDETRDecoder",
     "Segment",
     "SemanticSegment",
@@ -764,44 +770,104 @@ class Pose26(Pose):
         self.flow_model = None
         setattr(self, "one2one_cv4_sigma" if self.end2end else "cv4_sigma", None)
 
-    def kpts_decode(self, kpts: torch.Tensor) -> torch.Tensor:
-        """Decode keypoints from predictions."""
-        ndim = self.kpt_shape[1]
-        bs = kpts.shape[0]
-        if self.export:
-            y = kpts.view(bs, *self.kpt_shape, -1)
-            # NCNN fix
-            a = (y[:, :, :2] + self.anchors) * self.strides
-            if ndim == 3:
-                a = torch.cat((a, y[:, :, 2:3].sigmoid()), 2)
-            return a.view(bs, self.nk, -1)
-        else:
-            y = kpts.clone()
-            if ndim == 3:
-                y[:, 2::ndim] = y[:, 2::ndim].sigmoid()
-            y[:, 0::ndim] = (y[:, 0::ndim] + self.anchors[0]) * self.strides
-            y[:, 1::ndim] = (y[:, 1::ndim] + self.anchors[1]) * self.strides
-            return y
+
+class _PicoTower(nn.Sequential):
+    """Two PicoDet depthwise-separable feature blocks followed by their predictor."""
+
+    def __init__(self, c1: int, hidden: int, out: int):
+        super().__init__(
+            DWConv(c1, c1, 5), Conv(c1, hidden, 1),
+            DWConv(hidden, hidden, 5), Conv(hidden, hidden, 1),
+            nn.Conv2d(hidden, out, 1),
+        )
+
+
+class DetectPico(Detect):
+    """PicoDet feature towers with the standard Ultralytics Detect raw-output contract."""
+
+    def __init__(self, nc: int = 80, reg_max: int = 8, end2end: bool = False, ch: tuple[int, ...] = ()):
+        super().__init__(nc, reg_max, end2end, ch)
+        hidden = max(32, ch[0] // 2)
+        self.cv2 = nn.ModuleList(_PicoTower(c, hidden, 4 * reg_max) for c in ch)
+        self.cv3 = nn.ModuleList(_PicoTower(c, hidden, nc) for c in ch)
+        if end2end:
+            self.one2one_cv2 = copy.deepcopy(self.cv2)
+            self.one2one_cv3 = copy.deepcopy(self.cv3)
+
+
+class PosePico(Pose26):
+    """PicoDet detection head with Pose26-compatible keypoint and uncertainty branches."""
+
+    def __init__(
+        self,
+        nc: int = 80,
+        kpt_shape: tuple = (17, 3),
+        reg_max: int = 16,
+        end2end: bool = False,
+        ch: list[int] | tuple[int, ...] = (),
+    ):
+        super().__init__(nc, kpt_shape, reg_max, end2end, ch)
+        hidden = max(32, ch[0] // 2)
+        self.cv2 = nn.ModuleList(_PicoTower(c, hidden, 4 * reg_max) for c in ch)
+        self.cv3 = nn.ModuleList(_PicoTower(c, hidden, nc) for c in ch)
+
+        c4 = max(ch[0] // 4, kpt_shape[0] * (kpt_shape[1] + 2))
+        self.cv4 = nn.ModuleList(
+            nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3))
+            for x in ch
+        )
+
+        if end2end:
+            self.one2one_cv2 = copy.deepcopy(self.cv2)
+            self.one2one_cv3 = copy.deepcopy(self.cv3)
+            self.one2one_cv4 = copy.deepcopy(self.cv4)
+
+
+class PoseCus(Pose26):
+    """Pose26 head with a wider classification branch trained by softmax cross-entropy."""
+
+    def __init__(
+        self,
+        nc: int = 80,
+        kpt_shape: tuple = (17, 3),
+        reg_max: int = 16,
+        end2end: bool = False,
+        ch: list[int] | tuple[int, ...] = (),
+    ):
+        super().__init__(nc, kpt_shape, reg_max, end2end, ch)
+        c3 = max(ch[0], min(self.nc, 100))
+        self.cv3 = nn.ModuleList(
+            nn.Sequential(
+                DWConv(x, x, 3), Conv(x, x, 1),
+                DWConv(x, c3, 3),
+                DWConv(c3, c3, 3), Conv(c3, c3, 1),
+                # nn.Dropout2d(p=0.1, inplace=True),
+                nn.Conv2d(c3, self.nc, 1),
+            )
+            for x in ch
+        )
+        if end2end:
+            self.one2one_cv3 = copy.deepcopy(self.cv3)
 
 
 class _PoseAttnBlock(nn.Module):
-    """Residual multi-scale context block for low-resolution pose classification features."""
+    """Lightweight channel and spatial attention for pose classification features."""
 
     def __init__(self, channels: int):
         super().__init__()
-        self.local = DWConv(channels, channels, 3)
-        self.context = DWConv(channels, channels, 3, d=2)
-        self.fuse = Conv(2 * channels, channels, 1)
-        # self.attention = SE(channels)  # Alternative attention block.
-        self.attention = ECA(3)
+        self.channel_conv = nn.Conv1d(1, 1, kernel_size=3, padding=1, bias=False)
+        self.spatial_conv = nn.Conv2d(1, 1, kernel_size=7, padding=3, bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        features = torch.cat((self.local(x), self.context(x)), dim=1)
-        return x + self.fuse(features)
+        channel = x.mean(dim=(-2, -1), keepdim=True).flatten(2).transpose(1, 2)
+        channel = self.channel_conv(channel).transpose(1, 2).unsqueeze(-1).sigmoid()
+        features = x * channel
+        spatial = self.spatial_conv(features.mean(dim=1, keepdim=True)).sigmoid()
+        return x + features * spatial
 
 
 class PoseAttn(Pose26):
-    """Adapted Pose 26 head, Attn block in cls head."""
+    """Pose26 head with transformer-based spatial context in each classification branch."""
 
     def __init__(
             self,
@@ -816,14 +882,76 @@ class PoseAttn(Pose26):
         self.cv3 = nn.ModuleList(
             nn.Sequential(
                 nn.Sequential(DWConv(x, x, 3), Conv(x, c3, 1)),
-                nn.Sequential(ECA(3)),
                 nn.Sequential(DWConv(c3, c3, 3), Conv(c3, c3, 1)),
+                _PoseAttnBlock(c3),
                 nn.Conv2d(c3, self.nc, 1),
             )
             for x in ch
         )
         if end2end:
             self.one2one_cv3 = copy.deepcopy(self.cv3)
+
+
+class _TverskyProjection2d(nn.Module):
+    """Apply the official TverskyProjection to each spatial position in a BCHW tensor."""
+
+    def __init__(self, channels: int, num_classes: int):
+        super().__init__()
+
+        self.in_channels = channels
+        self.out_channels = num_classes
+        self.logit_scale = nn.Parameter(torch.tensor(math.log(1 / 1024)))
+        self.projection = TverskyProjection(
+            embedding_dim=channels,
+            class_count=num_classes,
+            fbank_size=2 * channels,
+            similarity_model="contrast",
+            intersection_reduction="mean",
+            difference_reduction="ignorematch",
+            normalize=True,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, _, h, w = x.shape
+        x = x.permute(0, 2, 3, 1).reshape(b, h * w, -1)
+        x = self.projection(x)
+        x = x * self.logit_scale.clamp(min=-20.0, max=0.0).exp()
+        # Fixed-scale alternative
+        # x = x * (1 / 1024)
+        return x.reshape(b, h, w, -1).permute(0, 3, 1, 2).contiguous()
+
+
+class PoseTversky(Pose26):
+    """Pose26 head using TverskyProjection for classification similarity scores."""
+
+    def __init__(
+        self,
+        nc: int = 80,
+        kpt_shape: tuple = (17, 3),
+        reg_max: int = 16,
+        end2end: bool = False,
+        ch: list[int] | tuple[int, ...] = (),
+    ):
+        super().__init__(nc, kpt_shape, reg_max, end2end, ch)
+        c3 = max(ch[0], min(self.nc, 100))
+        self.cv3 = nn.ModuleList(
+            nn.Sequential(
+                nn.Sequential(DWConv(x, x, 3), Conv(x, c3, 1)),
+                nn.Sequential(DWConv(c3, c3, 3), Conv(c3, c3, 1)),
+                _TverskyProjection2d(c3, self.nc),
+            )
+            for x in ch
+        )
+        if end2end:
+            self.one2one_cv3 = copy.deepcopy(self.cv3)
+
+    def bias_init(self) -> None:
+        """Initialize box biases; TverskyProjection has no class bias."""
+        for box_head in self.cv2:
+            box_head[-1].bias.data[:] = 2.0
+        if getattr(self, "one2one_cv2", None) is not None:
+            for box_head in self.one2one_cv2:
+                box_head[-1].bias.data[:] = 2.0
 
 
 class _CosineClassifier(nn.Module):

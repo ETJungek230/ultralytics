@@ -77,6 +77,8 @@ from .conv import (
     SpatialAttention,
     DualConv,
     AKConv,
+    TensorAdd,
+    SplitChannels,
 )
 from .head import (
     OBB,
@@ -84,10 +86,15 @@ from .head import (
     Classify,
     Depth,
     Detect,
+    DetectPico,
     LRPCHead,
     Pose,
+    PoseAttn,
     Pose26,
     PoseAf,
+    PoseCus,
+    PoseTversky,
+    PosePico,
     RTDETRDecoder,
     Segment,
     Segment26,
@@ -99,6 +106,8 @@ from .head import (
     v10Detect,
     MultiClassify,
 )
+from .ppdet import LiteHRNetWiderNaive, TinyPoseHeatmap
+from .tversky import TverskyProjection, TverskySimilarity
 from .transformer import (
     AIFI,
     MLP,
@@ -174,8 +183,15 @@ __all__ = (
     "MSDeformAttn",
     "MaxSigmoidAttnBlock",
     "Pose",
+    "PoseAttn",
     "Pose26",
     "PoseAf",
+    "PoseCus",
+    "PoseTversky",
+    "DetectPico",
+    "PosePico",
+    "LiteHRNetWiderNaive",
+    "TinyPoseHeatmap",
     "Proto",
     "RTDETRDecoder",
     "RepC3",

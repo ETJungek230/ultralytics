@@ -1108,6 +1108,30 @@ class C3k2(C2f):
             for _ in range(n)
         )
 
+class C3k2K(C2f):
+    """
+    C3k2 with configurable internal convolution kernel size.
+    Supports k=3 or k=5.
+    """
+
+    def __init__(
+        self,
+        c1: int,
+        c2: int,
+        n: int = 1,
+        c3k: bool = False,
+        e: float = 0.5,
+        k: int = 3,
+    ):
+        super().__init__(c1=c1,            c2=c2,            n=n,            shortcut=True,            g=1,            e=e,        )
+        self.k = k
+        self.m = nn.ModuleList(
+            C3k(self.c, self.c, 2, shortcut=True, g=1, e=1.0, k=k)
+            if c3k
+            else Bottleneck(self.c, self.c, shortcut=True, g=1, k=((k, k), (k, k)), e=1.0)
+            for _ in range(n)
+        )
+
 
 class C3k(C3):
     """C3k is a CSP bottleneck module with customizable kernel sizes for feature extraction in neural networks."""

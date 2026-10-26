@@ -26,6 +26,8 @@ __all__ = (
     "SpatialAttention",
     "DualConv",
     "AKConv",
+    "TensorAdd",
+    "SplitChannels",
 )
 
 
@@ -671,6 +673,35 @@ class Index(nn.Module):
             (torch.Tensor): Selected tensor.
         """
         return x[self.index]
+
+
+class TensorAdd(nn.Module):
+    """Element-wise addition for multiple feature maps."""
+
+    def forward(self, x):
+        if not isinstance(x, (list, tuple)) or len(x) < 2:
+            raise ValueError("Add expects at least two input tensors.")
+
+        shape = x[0].shape
+        if any(t.shape != shape for t in x[1:]):
+            raise ValueError("All tensors must have identical shapes.")
+
+        out = x[0]
+        for t in x[1:]:
+            out = out + t
+
+        return out
+
+
+class SplitChannels(nn.Module):
+    """Split a feature map evenly along the channel dimension."""
+
+    def __init__(self, chunks: int = 2):
+        super().__init__()
+        self.chunks = chunks
+
+    def forward(self, x: torch.Tensor) -> list[torch.Tensor]:
+        return list(torch.chunk(x, self.chunks, dim=1))
 
 
 class PartialConv3(nn.Module):

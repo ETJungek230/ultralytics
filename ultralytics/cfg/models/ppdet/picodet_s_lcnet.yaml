@@ -1,0 +1,110 @@
+# PP-PicoDet-v2-style model
+# Ultralytics YAML
+#
+# Backbone: LCNet x0.75
+# Neck: LCPAN, out_channels=96
+# Head: PicoDetHead, shared PicoFeat tower
+#
+# Input: 320x320
+# Outputs:
+#   P3: stride 8,  40x40
+#   P4: stride 16, 20x20
+#   P5: stride 32, 10x10
+#   P6: stride 64,  5x5
+
+# Parameters
+nc: 80
+activation: torch.nn.Hardswish() # (optional) model default activation function
+
+backbone:
+  # [from, repeats, module, args]
+
+  # LCNet Stem
+  - [ -1, 1, Conv, [ 16, 3, 2 ] ]                 # 0
+
+  # LCNet Stage 1
+  - [ -1, 1, LCNetBlock, [ 24, 3, 1, False ] ]    # 1
+
+  # LCNet Stage 2
+  - [ -1, 1, LCNetBlock, [ 48, 3, 2, False ] ]    # 2
+  - [ -1, 1, LCNetBlock, [ 48, 3, 1, False ] ]    # 3
+
+  # LCNet Stage 3: P3
+  - [ -1, 1, LCNetBlock, [ 96, 3, 2, False ] ]    # 4
+  - [ -1, 1, LCNetBlock, [ 96, 3, 1, False ] ]    # 5
+
+  # LCNet Stage 4: P4
+  - [ -1, 1, LCNetBlock, [ 192, 3, 2, False ] ]   # 6
+  - [ -1, 1, LCNetBlock, [ 192, 5, 1, False ] ]   # 7
+  - [ -1, 1, LCNetBlock, [ 192, 5, 1, False ] ]   # 8
+  - [ -1, 1, LCNetBlock, [ 192, 5, 1, False ] ]   # 9
+  - [ -1, 1, LCNetBlock, [ 192, 5, 1, False ] ]   # 10
+  - [ -1, 1, LCNetBlock, [ 192, 5, 1, False ] ]   # 11
+
+  # LCNet Stage 5: P5
+  - [ -1, 1, LCNetBlock, [ 384, 5, 2, True ] ]    # 12
+  - [ -1, 1, LCNetBlock, [ 384, 5, 1, True ] ]    # 13
+
+
+head:
+  # =========================================
+  # LCPAN: Lateral projections
+  # =========================================
+
+  - [ 5, 1, Conv, [ 96, 1, 1 ] ]                  # 14 P3 lateral
+  - [ 11, 1, Conv, [ 96, 1, 1 ] ]                 # 15 P4 lateral
+  - [ 13, 1, Conv, [ 96, 1, 1 ] ]                 # 16 P5 lateral
+
+  # =========================================
+  # LCPAN: Top-down P5 -> P4
+  # =========================================
+
+  - [ 16, 1, nn.Upsample, [ None, 2, nearest ] ]  # 17
+  - [ [ 17, 15 ], 1, Concat, [ 1 ] ]              # 18
+
+  - [ -1, 1, LCNetBlock, [ 192, 5, 1, False ] ]   # 19
+  - [ -1, 1, LCNetBlock, [ 96, 5, 1, False ] ]    # 20 Inner4
+
+  # =========================================
+  # LCPAN: Top-down P4 -> P3
+  # =========================================
+
+  - [ 20, 1, nn.Upsample, [ None, 2, nearest ] ]  # 21
+  - [ [ 21, 14 ], 1, Concat, [ 1 ] ]              # 22
+
+  - [ -1, 1, LCNetBlock, [ 192, 5, 1, False ] ]   # 23
+  - [ -1, 1, LCNetBlock, [ 96, 5, 1, False ] ]    # 24 Out3
+
+  # =========================================
+  # LCPAN: Bottom-up P3 -> P4
+  # =========================================
+
+  - [ 24, 1, Conv, [ 96, 5, 2 ] ]                 # 25
+  - [ [ 25, 20 ], 1, Concat, [ 1 ] ]              # 26
+
+  - [ -1, 1, LCNetBlock, [ 192, 5, 1, False ] ]   # 27
+  - [ -1, 1, LCNetBlock, [ 96, 5, 1, False ] ]    # 28 Out4
+
+  # =========================================
+  # LCPAN: Bottom-up P4 -> P5
+  # =========================================
+
+  - [ 28, 1, Conv, [ 96, 5, 2 ] ]                 # 29
+  - [ [ 29, 16 ], 1, Concat, [ 1 ] ]              # 30
+
+  - [ -1, 1, LCNetBlock, [ 192, 5, 1, False ] ]   # 31
+  - [ -1, 1, LCNetBlock, [ 96, 5, 1, False ] ]    # 32 Out5
+
+  # =========================================
+  # LCPAN: P6 fusion
+  # =========================================
+
+  - [ 16, 1, Conv, [ 96, 5, 2 ] ]                 # 33
+  - [ 32, 1, Conv, [ 96, 5, 2 ] ]                 # 34
+  - [ [ 33, 34 ], 1, TensorAdd, [ ] ]                   # 35 Out6
+
+  # =========================================
+  # Pico Detect Head
+  # =========================================
+
+  - [ [ 24, 28, 32, 35 ], 1, DetectPico, [ nc ] ]  # 36
