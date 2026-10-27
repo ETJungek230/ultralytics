@@ -770,6 +770,25 @@ class Pose26(Pose):
         self.flow_model = None
         setattr(self, "one2one_cv4_sigma" if self.end2end else "cv4_sigma", None)
 
+    def kpts_decode(self, kpts: torch.Tensor) -> torch.Tensor:
+        """Decode keypoints from predictions."""
+        ndim = self.kpt_shape[1]
+        bs = kpts.shape[0]
+        if self.export:
+            y = kpts.view(bs, *self.kpt_shape, -1)
+            # NCNN fix
+            a = (y[:, :, :2] + self.anchors) * self.strides
+            if ndim == 3:
+                a = torch.cat((a, y[:, :, 2:3].sigmoid()), 2)
+            return a.view(bs, self.nk, -1)
+        else:
+            y = kpts.clone()
+            if ndim == 3:
+                y[:, 2::ndim] = y[:, 2::ndim].sigmoid()
+            y[:, 0::ndim] = (y[:, 0::ndim] + self.anchors[0]) * self.strides
+            y[:, 1::ndim] = (y[:, 1::ndim] + self.anchors[1]) * self.strides
+            return y
+
 
 class _PicoTower(nn.Sequential):
     """Two PicoDet depthwise-separable feature blocks followed by their predictor."""
