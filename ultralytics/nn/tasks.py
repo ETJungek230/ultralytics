@@ -40,6 +40,7 @@ from ultralytics.nn.modules import (
     C2fPSA,
     C3Ghost,
     C3k2,
+    C3k2K,
     C3x,
     PConvC3k2,
     CBFuse,
@@ -2226,6 +2227,7 @@ def parse_model(d, ch, verbose=True):
             C2,
             C2f,
             C3k2,
+            C3k2K,
             PConvC3k2,
             RepNCSPELAN4,
             ELAN1,
@@ -2255,6 +2257,7 @@ def parse_model(d, ch, verbose=True):
             C2,
             C2f,
             C3k2,
+            C3k2K,
             PConvC3k2,
             C2fAttn,
             C3,
@@ -2302,7 +2305,7 @@ def parse_model(d, ch, verbose=True):
             if m in repeat_modules:
                 args.insert(2, n)  # number of repeats
                 n = 1
-            if m is C3k2 or m is PConvC3k2:  # for M/L/X sizes
+            if m is C3k2 or m is C3k2K or m is PConvC3k2:  # for M/L/X sizes
                 legacy_inferred = False
                 if scale in {"m", "l", "x"}:
                     args[3:4] = [True]  # slice assignment also supplies c3k when the YAML omits it

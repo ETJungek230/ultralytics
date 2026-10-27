@@ -857,10 +857,8 @@ class PoseCus(Pose26):
         c3 = max(ch[0], min(self.nc, 100))
         self.cv3 = nn.ModuleList(
             nn.Sequential(
-                DWConv(x, x, 3), Conv(x, x, 1),
-                DWConv(x, c3, 3),
-                DWConv(c3, c3, 3), Conv(c3, c3, 1),
-                # nn.Dropout2d(p=0.1, inplace=True),
+                nn.Sequential(DWConv(x, x, 3), Conv(x, c3, 1)),
+                nn.Sequential(DWConv(c3, c3, 3), Conv(c3, c3, 1)),
                 nn.Conv2d(c3, self.nc, 1),
             )
             for x in ch
