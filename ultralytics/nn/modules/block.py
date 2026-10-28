@@ -1123,7 +1123,7 @@ class C3k2K(C2f):
         e: float = 0.5,
         k: int = 3,
     ):
-        super().__init__(c1=c1,            c2=c2,            n=n,            shortcut=True,            g=1,            e=e,        )
+        super().__init__(c1=c1, c2=c2, n=n, shortcut=True, g=1, e=e)
         self.k = k
         self.m = nn.ModuleList(
             C3k(self.c, self.c, 2, shortcut=True, g=1, e=1.0, k=k)
