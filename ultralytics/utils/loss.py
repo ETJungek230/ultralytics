@@ -917,17 +917,17 @@ class ArcFaceLoss(nn.Module):
         return F.cross_entropy(logits, labels.long())
 
     # Temporarily disabled ArcFace background-negative objective; retained for later restoration.
-    # def background_loss(self, cosine: torch.Tensor) -> torch.Tensor:
-    #     """Classify unassigned anchors as background against a fixed zero-logit background class."""
-    #     if not cosine.numel():
-    #         return cosine.sum() * 0
-    #     cosine = cosine.float()
-    #     background_logit = torch.zeros_like(cosine[..., :1])
-    #     logits = torch.cat((cosine, background_logit), dim=-1) * self.scale
-    #     background_labels = torch.full(
-    #         cosine.shape[:-1], cosine.shape[-1], device=cosine.device, dtype=torch.long
-    #     )
-    #     return F.cross_entropy(logits.reshape(-1, logits.shape[-1]), background_labels.reshape(-1))
+    def background_loss(self, cosine: torch.Tensor) -> torch.Tensor:
+        """Classify unassigned anchors as background against a fixed zero-logit background class."""
+        if not cosine.numel():
+            return cosine.sum() * 0
+        cosine = cosine.float()
+        background_logit = torch.zeros_like(cosine[..., :1])
+        logits = torch.cat((cosine, background_logit), dim=-1) * self.scale
+        background_labels = torch.full(
+            cosine.shape[:-1], cosine.shape[-1], device=cosine.device, dtype=torch.long
+        )
+        return F.cross_entropy(logits.reshape(-1, logits.shape[-1]), background_labels.reshape(-1))
 
 
 class PoseLoss26(v8PoseLoss):
@@ -1114,7 +1114,7 @@ class PoseLossAf(PoseLoss26):
 
     arcface_scale = 8.0
     arcface_margin = 0.30
-    # arcface_negative_gain = 0.1  # Reserved for the disabled background-negative objective.
+    arcface_negative_gain = 0.1  # Reserved for the disabled background-negative objective.
     arcface_gain = 0.1
 
     def __init__(self, model: torch.nn.Module, tal_topk: int = 10, tal_topk2: int | None = None):
@@ -1126,16 +1126,16 @@ class PoseLossAf(PoseLoss26):
         ).to(self.device)
         self.cosine_scale = head.cosine_scale
         self.arcface_gain = getattr(self.hyp, "arcface", 0.1)
-        # self._arcface_negative_loss = None  # Reserved for the disabled background-negative objective.
+        self._arcface_negative_loss = None  # Reserved for the disabled background-negative objective.
         self._arcface_assignment = None
 
-    def get_assigned_targets_and_loss(self, preds: dict[str, torch.Tensor], batch: dict[str, Any]) -> tuple:
-        result = super().get_assigned_targets_and_loss(preds, batch)
+    def get_assigned_targets_and_loss(self, preds: dict[str, torch.Tensor], batch: dict[str, Any], **assign_kwargs) -> tuple:
+        result = super().get_assigned_targets_and_loss(preds, batch, **assign_kwargs)
         self._arcface_assignment = result[0]
         # ArcFace background-negative objective, disabled for now:
-        # fg_mask = result[0][0]
-        # background_cosine = preds["scores"].permute(0, 2, 1)[~fg_mask] / self.cosine_scale
-        # self._arcface_negative_loss = self.arcface_loss.background_loss(background_cosine)
+        fg_mask = result[0][0]
+        background_cosine = preds["scores"].permute(0, 2, 1)[~fg_mask] / self.cosine_scale
+        self._arcface_negative_loss = self.arcface_loss.background_loss(background_cosine)
         return result
 
     def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) \
@@ -1159,11 +1159,12 @@ class PoseLossAf(PoseLoss26):
         arcface = arcface * self.arcface_gain
         loss_items["af_loss"] = arcface.detach()
         # ArcFace background-negative objective, disabled for now:
-        # arcface_negative = self._arcface_negative_loss
-        # if arcface_negative is None:
-        #     arcface_negative = preds["scores"].sum() * 0
-        # arcface_negative = arcface_negative * self.arcface_negative_gain * self.hyp.cls
-        # loss_items["af_n_loss"] = arcface_negative.detach()
+        arcface_negative = self._arcface_negative_loss
+        if arcface_negative is None:
+            arcface_negative = preds["scores"].sum() * 0
+        arcface_negative = arcface_negative * self.arcface_negative_gain * self.hyp.cls
+        loss_items["af_n_loss"] = arcface_negative.detach()
+        loss[3] += arcface_negative * batch_size
         # Retain native cv3 BCE cls supervision and add foreground ArcFace only.
         loss[3] += arcface * batch_size
         return loss, loss_items
