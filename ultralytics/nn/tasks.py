@@ -22,10 +22,14 @@ from ultralytics.nn.modules import (
     C2PSA,
     C3,
     C3TR,
+    CA,
     ELAN1,
+    GELAN,
     OBB,
     OBB26,
     PSA,
+    DSC3k2,
+    BiFormerAttention,
     SPP,
     SPPELAN,
     SPPF,
@@ -56,6 +60,7 @@ from ultralytics.nn.modules import (
     DWConvTranspose2d,
     DualConv,
     AKConv,
+    DySample,
     Focus,
     GhostBottleneck,
     GhostConv,
@@ -2229,6 +2234,7 @@ def parse_model(d, ch, verbose=True):
             C3k2,
             C3k2K,
             PConvC3k2,
+            DSC3k2,
             RepNCSPELAN4,
             ELAN1,
             ADown,
@@ -2259,6 +2265,7 @@ def parse_model(d, ch, verbose=True):
             C3k2,
             C3k2K,
             PConvC3k2,
+            DSC3k2,
             C2fAttn,
             C3,
             C3TR,
@@ -2404,6 +2411,32 @@ def parse_model(d, ch, verbose=True):
             c2 = args[0]
             c1 = ch[f]
             args = [*args[1:]]
+        elif m is DySample:
+            # DySample: takes input channels, outputs same channels (with scale_factor)
+            c1 = ch[f]
+            c2 = c1  # same channels in and out
+            scale_factor = args[0] if args else 2
+            args = [c1, scale_factor]
+        elif m is CA:
+            # CA (Coordinate Attention): takes channels, optional reduction ratio
+            c1 = ch[f]
+            c2 = c1  # same channels in and out
+            reduction = args[0] if args else 16
+            args = [c1, reduction]
+        elif m is GELAN:
+            # GELAN: takes c1, c2, c3 (intermediate channels)
+            c1 = ch[f]
+            c2 = args[0] if len(args) > 0 else c1
+            c3 = args[1] if len(args) > 1 else c1 // 2
+            args = [c1, c2, c3]
+        elif m is BiFormerAttention:
+            # BiFormerAttention: takes c1, c2, num_heads, token_aware, channel_aware
+            c1 = ch[f]
+            c2 = args[0] if len(args) > 0 else c1
+            num_heads = args[1] if len(args) > 1 else 8
+            token_aware = args[2] if len(args) > 2 else True
+            channel_aware = args[3] if len(args) > 3 else True
+            args = [c1, c2, num_heads, token_aware, channel_aware]
         else:
             c2 = ch[f]
 

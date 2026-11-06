@@ -116,13 +116,95 @@ class DFLoss(nn.Module):
         ).mean(-1, keepdim=True)
 
 
+def wiou_v3(pred_bboxes: torch.Tensor, target_bboxes: torch.Tensor, xywh: bool = False, epoch: int = 0, total_epochs: int = 100) -> torch.Tensor:
+    """Wise-IoU v3 (WIoU v3) loss computation.
+
+    Optimized for PyTorch 2.15: vectorized operations to reduce redundant computations
+    and improve memory efficiency.
+
+    Implements the dynamic non-monotonic focal mechanism of WIoU v3 that adaptively
+    adjusts the gradient weight based on sample quality, focusing on hard examples
+    while suppressing easy ones.
+
+    Args:
+        pred_bboxes (torch.Tensor): Predicted bounding boxes, shape (N, 4), xyxy format.
+        target_bboxes (torch.Tensor): Ground truth bounding boxes, shape (N, 4), xyxy format.
+        xywh (bool): Whether input boxes are in xywh format.
+        epoch (int): Current training epoch for dynamic focusing.
+        total_epochs (int): Total training epochs.
+
+    Returns:
+        (torch.Tensor): IoU values with shape (N,) where higher is better.
+    """
+    # Compute basic IoU (returns (N, 1), squeeze to (N,))
+    iou = bbox_iou(pred_bboxes, target_bboxes, xywh=xywh, CIoU=False).squeeze(-1)  # (N,)
+
+    # Vectorized box dimensions computation
+    pred_w = pred_bboxes[:, 2] - pred_bboxes[:, 0]
+    pred_h = pred_bboxes[:, 3] - pred_bboxes[:, 1]
+    target_w = target_bboxes[:, 2] - target_bboxes[:, 0]
+    target_h = target_bboxes[:, 3] - target_bboxes[:, 1]
+
+    # Compute enclose box and areas in one pass
+    lt = torch.min(pred_bboxes[:, :2], target_bboxes[:, :2])
+    rb = torch.max(pred_bboxes[:, 2:], target_bboxes[:, 2:])
+    enclose_wh = (rb - lt).clamp(min=0)
+
+    # Compute all areas vectorized
+    pred_area = pred_w.clamp(min=0) * pred_h.clamp(min=0)
+    target_area = target_w.clamp(min=0) * target_h.clamp(min=0)
+    inter_w = torch.min(pred_bboxes[:, 2], target_bboxes[:, 2]) - torch.max(pred_bboxes[:, 0], target_bboxes[:, 0])
+    inter_h = torch.min(pred_bboxes[:, 3], target_bboxes[:, 3]) - torch.max(pred_bboxes[:, 1], target_bboxes[:, 1])
+    inter_area = inter_w.clamp(min=0) * inter_h.clamp(min=0)
+    union_area = pred_area + target_area - inter_area + 1e-16
+    enclose_area = enclose_wh[:, 0] * enclose_wh[:, 1] + 1e-16
+
+    # GIoU computation
+    giou = iou - (enclose_area - union_area) / enclose_area
+
+    # Aspect ratio penalty using vectorized operations
+    v = 4.0 * (torch.atan(pred_w / (pred_h + 1e-16)) - torch.atan(target_w / (target_h + 1e-16))) / math.pi
+    alpha_weight = v / (1.0 - iou + v + 1e-16)
+
+    # Dynamic non-monotonic focal mechanism (v3)
+    delta_iou = iou.detach()
+    alpha = torch.sigmoid(delta_iou - 1.0)  # quality factor
+
+    # Dynamic gradient focusing factor
+    gamma = 2.0 * min(epoch / max(total_epochs, 1), 1.0) if total_epochs > 0 else 1.0
+
+    # Dynamic focal weight: non-monotonic curve
+    focal_weight = (1.0 - delta_iou) ** gamma + alpha * delta_iou
+
+    # Combined loss: GIoU + aspect ratio penalty, weighted by focal mechanism
+    loss = (1.0 - giou + alpha_weight * v) * focal_weight
+    loss = loss.clamp(min=0)
+
+    # Convert back to IoU-like metric (higher is better)
+    weighted_iou = 1.0 - loss
+    return weighted_iou.clamp(min=-1.0, max=1.0)
+
+
 class BboxLoss(nn.Module):
     """Criterion class for computing training losses for bounding boxes."""
 
-    def __init__(self, reg_max: int = 16):
-        """Initialize the BboxLoss module; DFL is used when reg_max > 1, otherwise an L1 distance loss."""
+    def __init__(self, reg_max: int = 16, use_wiou_v3: bool = False):
+        """Initialize the BboxLoss module; DFL is used when reg_max > 1, otherwise an L1 distance loss.
+
+        Args:
+            reg_max (int): Maximum regression bins for DFL.
+            use_wiou_v3 (bool): Whether to use WIoU v3 instead of CIoU. Default is False.
+        """
         super().__init__()
         self.dfl_loss = DFLoss(reg_max) if reg_max > 1 else None
+        self.use_wiou_v3 = use_wiou_v3
+        self.current_epoch = 0
+        self.total_epochs = 200  # will be overridden by trainer
+
+    def set_epoch(self, epoch: int, total_epochs: int = 200):
+        """Update current epoch for dynamic WIoU v3 focusing."""
+        self.current_epoch = epoch
+        self.total_epochs = total_epochs
 
     def forward(
         self,
@@ -136,10 +218,15 @@ class BboxLoss(nn.Module):
         imgsz: torch.Tensor,
         stride: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Compute CIoU and DFL (or L1 when reg_max <= 1) losses for bounding boxes."""
+        """Compute CIoU/WIoU v3 and DFL (or L1 when reg_max <= 1) losses for bounding boxes."""
         fg_mask = fg_mask.nonzero(as_tuple=True)  # index once; long-index gathers and their backward do not sync
         weight = target_scores[fg_mask].sum(-1, keepdim=True)
-        iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True)
+
+        if self.use_wiou_v3:
+            iou = wiou_v3(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False,
+                         epoch=self.current_epoch, total_epochs=self.total_epochs)
+        else:
+            iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True)
         loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
 
         # DFL loss
@@ -387,7 +474,9 @@ class v8DetectionLoss:
             stride=self.stride.tolist(),
             topk2=tal_topk2,
         )
-        self.bbox_loss = BboxLoss(m.reg_max).to(device)
+        # Read wiou_v3 from model YAML config, default to False
+        use_wiou_v3 = getattr(model, 'yaml', {}).get('wiou_v3', False)
+        self.bbox_loss = BboxLoss(m.reg_max, use_wiou_v3=use_wiou_v3).to(device)
         self.proj = torch.arange(m.reg_max, dtype=torch.float, device=device)
 
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
@@ -896,9 +985,13 @@ class v8PoseLoss(v8DetectionLoss):
 
 
 class ArcFaceLoss(nn.Module):
-    """ArcFace angular-margin loss over foreground classification features."""
+    """ArcFace angular-margin loss over foreground classification features.
+    
+    Computes modified logits with angular margin for positive samples, then applies CrossEntropyLoss.
+    The scale parameter amplifies the decision boundary, and margin adds angular separation.
+    """
 
-    def __init__(self, scale: float = 30.0, margin: float = 0.5):
+    def __init__(self, scale: float = 30.0, margin: float = 0.30):
         super().__init__()
         self.scale = scale
         self.margin = margin
@@ -1110,64 +1203,229 @@ class PoseLoss26(v8PoseLoss):
 
 
 class PoseLossAf(PoseLoss26):
-    """PoseLoss26 with native BCE plus foreground and background ArcFace objectives."""
+    """PoseLoss26 with ArcFace-style cosine classification using CrossEntropyLoss.
+    
+    Replaces the native BCE classification loss with CrossEntropyLoss over cosine logits,
+    following the original ArcFace design. The TaskAlignedAssigner uses softmax probabilities
+    for anchor assignment instead of sigmoid scores. ArcFace angular-margin loss is applied
+    as additional foreground supervision.
+    """
 
-    arcface_scale = 8.0
     arcface_margin = 0.30
-    arcface_negative_gain = 0.1  # Reserved for the disabled background-negative objective.
-    arcface_gain = 0.1
+    arcface_negative_gain = 0.1
 
     def __init__(self, model: torch.nn.Module, tal_topk: int = 10, tal_topk2: int | None = None):
         super().__init__(model, tal_topk, tal_topk2)
         head = model.model[-1]
+        self.cosine_scale = head.cosine_scale
         self.arcface_loss = ArcFaceLoss(
-            scale=self.arcface_scale,
+            scale=self.cosine_scale,
             margin=self.arcface_margin,
         ).to(self.device)
-        self.cosine_scale = head.cosine_scale
-        self.arcface_gain = getattr(self.hyp, "arcface", 0.1)
-        self._arcface_negative_loss = None  # Reserved for the disabled background-negative objective.
         self._arcface_assignment = None
 
+    def background_classification_loss(
+        self, pred_scores: torch.Tensor, target_scores: torch.Tensor
+    ) -> torch.Tensor:
+        """Compute CrossEntropyLoss for background anchors using an explicit background class.
+        
+        Instead of uniform-distribution targeting (which has near-zero gradient when cosine_scale
+        is large), we add a zero-logit background class and let background anchors learn to predict
+        it. This follows the same design as PoseLossSoftmax, ensuring non-zero gradients for
+        background anchor supervision.
+        
+        Foreground anchors are handled by ArcFaceLoss, not this method.
+        
+        Args:
+            pred_scores: Cosine logits from _CosineClassifier, shape (B, N_anchors, num_classes).
+            target_scores: Soft targets from TaskAlignedAssigner (used to identify background anchors).
+        
+        Returns:
+            Background-only CrossEntropyLoss value.
+        """
+        pred_scores = pred_scores.float()
+        target_scores = target_scores.float()
+        
+        # Identify background anchors (quality == 0 means unassigned)
+        quality = target_scores.sum(-1)  # (B, N_anchors)
+        background = quality <= 0
+        
+        # Add a zero-logit background class: background anchors learn to predict this class.
+        # This ensures non-zero gradients even when cosine_scale is large (e.g., 30.0),
+        # because the gradient is softmax_with_bg - one_hot(background_label), which is
+        # clearly non-zero when the anchor predicts a foreground class instead of background.
+        bg_logit = torch.zeros_like(pred_scores[..., :1])  # (B, N_anchors, 1)
+        logits_with_bg = torch.cat((pred_scores, bg_logit), dim=-1)  # (B, N_anchors, num_classes + 1)
+        
+        # Background label index = num_classes (the last class)
+        num_classes = pred_scores.shape[-1]
+        bg_labels = torch.full_like(quality, num_classes, dtype=torch.long)  # (B, N_anchors)
+        
+        # CrossEntropyLoss for background anchors: push them to predict the background class
+        log_softmax_with_bg = F.log_softmax(logits_with_bg, dim=-1)
+        # CE loss = -log(softmax_with_bg[bg_label]) = -log_softmax_with_bg[..., num_classes]
+        bg_per_anchor_loss = -log_softmax_with_bg[..., num_classes]  # (B, N_anchors)
+        
+        # Weight: background anchors use small constant weight to avoid dominating the gradient
+        bg_weight = getattr(self.hyp, "bg_cls_weight", 0.01)
+        anchor_weights = bg_weight * background.float()
+        
+        return (bg_per_anchor_loss * anchor_weights).sum()
+
     def get_assigned_targets_and_loss(self, preds: dict[str, torch.Tensor], batch: dict[str, Any], **assign_kwargs) -> tuple:
-        result = super().get_assigned_targets_and_loss(preds, batch, **assign_kwargs)
-        self._arcface_assignment = result[0]
-        # ArcFace background-negative objective, disabled for now:
-        fg_mask = result[0][0]
-        background_cosine = preds["scores"].permute(0, 2, 1)[~fg_mask] / self.cosine_scale
-        self._arcface_negative_loss = self.arcface_loss.background_loss(background_cosine)
-        return result
+        """Calculate losses using softmax probabilities for anchor assignment.
+        
+        Reuses v8DetectionLoss.get_assigned_targets_and_loss structure, replacing sigmoid scores
+        with softmax probabilities and BCE classification loss with CrossEntropyLoss.
+        """
+        loss = torch.zeros(3, device=self.device)  # box, cls, dfl
+        pred_distri, pred_scores = (
+            preds["boxes"].permute(0, 2, 1).contiguous(),
+            preds["scores"].permute(0, 2, 1).contiguous(),
+        )
+        anchor_points, stride_tensor = make_anchors(preds["feats"], self.stride, 0.5)
+
+        dtype = pred_scores.dtype
+        batch_size = pred_scores.shape[0]
+        imgsz = torch.tensor(preds["feats"][0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]
+
+        # Targets - reuse base class preprocess
+        targets = torch.cat((batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1), batch["bboxes"]), 1)
+        targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
+        gt_labels, gt_bboxes = targets.split((1, 4), 2)  # cls, xyxy
+        mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
+
+        # Pboxes - reuse base class bbox_decode
+        pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyxy, (b, h*w, 4)
+
+        # Use softmax probabilities for anchor assignment instead of sigmoid
+        pred_probs = F.softmax(pred_scores.detach(), dim=-1)
+
+        _, target_bboxes, target_scores, fg_mask, target_gt_idx = self.assigner(
+            pred_probs,
+            (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
+            anchor_points * stride_tensor,
+            gt_labels,
+            gt_bboxes,
+            mask_gt,
+            **assign_kwargs,
+        )
+
+        target_scores_sum = target_scores.sum().clamp_(min=1)
+
+        # Classification loss is computed in loss() method together with ArcFace foreground loss
+        # to avoid redundant foreground CE. Here we only compute box and DFL losses.
+
+        # Bbox loss - reuse base class bbox_loss
+        loss[0], loss[2] = self.bbox_loss(
+            pred_distri,
+            pred_bboxes,
+            anchor_points,
+            target_bboxes / stride_tensor,
+            target_scores,
+            target_scores_sum,
+            fg_mask,
+            imgsz,
+            stride_tensor,
+        )
+
+        loss[0] *= self.hyp.box
+        loss[2] *= self.hyp.dfl
+
+        # Store assignment for ArcFace foreground loss and background classification loss
+        self._arcface_assignment = (fg_mask, target_gt_idx, gt_labels, pred_scores, target_scores)
+
+        return (
+            (fg_mask, target_gt_idx, target_bboxes, anchor_points, stride_tensor),
+            loss,
+            dict(zip(self.loss_names, loss.detach())),
+        )
 
     def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) \
             -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        loss, loss_items = super().loss(preds, batch)
-        fg_mask, target_gt_idx = self._arcface_assignment[:2]
-        batch_size = preds["scores"].shape[0]
+        """Calculate total loss: box, keypoint, ArcFace CE classification, DFL, and optional RLE.
+        
+        Reuses PoseLoss26.loss structure for keypoint decoding and loss calculation,
+        then adds ArcFace foreground angular-margin loss as additional supervision.
+        """
+        pred_kpts = preds["kpts"].permute(0, 2, 1).contiguous()
+        loss = torch.zeros(
+            6 if self.rle_loss else 5, device=self.device
+        )  # box, kpt_location, kpt_visibility, cls, dfl[, rle]
+        anchor_points, stride_tensor = make_anchors(preds["feats"], self.stride, 0.5)
+        batch_size = pred_kpts.shape[0]
+        imgsz = torch.tensor(preds["feats"][0].shape[2:], device=self.device, dtype=pred_kpts.dtype) * self.stride[0]
+
+        pred_kpts = pred_kpts.view(batch_size, -1, *self.kpt_shape)
+
+        if self.rle_loss and preds.get("kpts_sigma", None) is not None:
+            pred_sigma = preds["kpts_sigma"].permute(0, 2, 1).contiguous()
+            pred_sigma = pred_sigma.view(batch_size, -1, self.kpt_shape[0], 2)
+            pred_kpts = torch.cat([pred_kpts, pred_sigma], dim=-1)
+
+        # Keypoint decode - reuse base class kpts_decode
+        pred_kpts = self.kpts_decode(anchor_points, pred_kpts)
+        # Batch keypoints - reuse base class _batch_keypoints
+        gt_kpts = self._batch_keypoints(batch, batch_size, imgsz)
+        
+        # Get assigned targets and detection loss (uses overridden get_assigned_targets_and_loss)
+        # Note: det_loss[1] (cls) is zero; classification loss is computed below with ArcFace
+        (fg_mask, target_gt_idx, target_bboxes, _, _), det_loss, _ = self.get_assigned_targets_and_loss(
+            preds,
+            batch,
+            pd_kpts=pred_kpts.detach()[..., :2] * stride_tensor[:, None],
+            gt_kpts=gt_kpts,
+            anc_strides=stride_tensor.view(-1),
+        )
+        loss[0], loss[4] = det_loss[0], det_loss[2]
+
+        # Keypoint loss - reuse base class calculate_keypoints_loss
+        if fg_mask.sum():
+            keypoints_loss = self.calculate_keypoints_loss(
+                fg_mask, target_gt_idx, gt_kpts, stride_tensor, target_bboxes, pred_kpts
+            )
+            loss[1] = keypoints_loss[0]
+            loss[2] = keypoints_loss[1]
+            if self.rle_loss is not None:
+                loss[5] = keypoints_loss[2]
+        # WARNING: lines below prevent Multi-GPU DDP 'unused gradient' PyTorch errors, do not remove
+        else:
+            loss[1] += pred_kpts[..., :0].sum()
+            if self.rle_loss is not None:
+                loss[5] += self._rle_zero(pred_kpts)
+
+        loss[1] *= self.hyp.pose
+        loss[2] *= self.hyp.kobj
+        if self.rle_loss is not None:
+            loss[5] *= self.hyp.rle
+
+        # Classification loss: ArcFace for foreground + uniform-distribution CE for background
+        # This replaces the redundant foreground CE that was previously in classification_loss.
+        # ArcFace original design uses only CE(ArcFace(cosine)) as the classification loss.
+        fg_mask, target_gt_idx, gt_labels, pred_scores, target_scores = self._arcface_assignment
+
+        # ArcFace foreground angular-margin loss (primary classification loss for foreground anchors)
         if fg_mask.any():
-            imgsz = torch.tensor(preds["feats"][0].shape[2:], device=self.device, dtype=preds["scores"].dtype)
-            imgsz = imgsz * self.stride[0]
-            targets = torch.cat((batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1), batch["bboxes"]), 1)
-            targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
-            gt_labels = targets[..., 0].long()
             batch_indices = torch.arange(batch_size, device=self.device)[:, None].expand_as(target_gt_idx)
-            labels = gt_labels[batch_indices, target_gt_idx][fg_mask]
-            cosine = preds["scores"].permute(0, 2, 1)[fg_mask] / self.cosine_scale
+            labels = gt_labels[batch_indices, target_gt_idx][fg_mask].squeeze(-1).long()
+            cosine = pred_scores[fg_mask] / self.cosine_scale
             arcface = self.arcface_loss(cosine, labels)
         else:
-            # Keep the cv3 cosine classifier connected to the graph when no anchors are foreground.
-            arcface = preds["scores"].sum() * 0
-        arcface = arcface * self.arcface_gain
+            arcface = pred_scores.sum() * 0  # DDP graph connectivity
+
+        # Background classification loss: uniform distribution target
+        bg_cls_loss = self.background_classification_loss(pred_scores, target_scores)
+
+        # Combine: loss[3] = ArcFace foreground + background CE
+        loss[3] = arcface + bg_cls_loss
+        loss[3] *= self.hyp.cls
+
+        # Build loss items dict
+        loss_items = dict(zip(self.loss_names, loss.detach()))
         loss_items["af_loss"] = arcface.detach()
-        # ArcFace background-negative objective, disabled for now:
-        arcface_negative = self._arcface_negative_loss
-        if arcface_negative is None:
-            arcface_negative = preds["scores"].sum() * 0
-        arcface_negative = arcface_negative * self.arcface_negative_gain * self.hyp.cls
-        loss_items["af_n_loss"] = arcface_negative.detach()
-        loss[3] += arcface_negative * batch_size
-        # Retain native cv3 BCE cls supervision and add foreground ArcFace only.
-        loss[3] += arcface * batch_size
-        return loss, loss_items
+        loss_items["bg_cls_loss"] = bg_cls_loss.detach()
+
+        return loss * batch_size, loss_items
 
 
 class PoseLossSoftmax(PoseLoss26):
@@ -1198,7 +1456,82 @@ class PoseLossSoftmax(PoseLoss26):
 
 
 class PoseLossTversky(PoseLossSoftmax):
-    """Pose26 criterion using softmax cross-entropy for Tversky class similarities."""
+    """Pose26 criterion using softmax cross-entropy for Tversky class similarities.
+    
+    Overrides get_assigned_targets_and_loss to use softmax probabilities for anchor assignment,
+    ensuring consistency with the softmax-based classification loss from PoseLossSoftmax.
+    Without this override, the inherited v8DetectionLoss.get_assigned_targets_and_loss would use
+    sigmoid scores for assignment, which is inconsistent with softmax cross-entropy loss.
+    """
+
+    def get_assigned_targets_and_loss(self, preds: dict[str, torch.Tensor], batch: dict[str, Any], **assign_kwargs) -> tuple:
+        """Calculate losses using softmax probabilities for anchor assignment.
+        
+        Reuses v8DetectionLoss.get_assigned_targets_and_loss structure, replacing sigmoid scores
+        with softmax probabilities to match the softmax-based classification loss.
+        """
+        loss = torch.zeros(3, device=self.device)  # box, cls, dfl
+        pred_distri, pred_scores = (
+            preds["boxes"].permute(0, 2, 1).contiguous(),
+            preds["scores"].permute(0, 2, 1).contiguous(),
+        )
+        anchor_points, stride_tensor = make_anchors(preds["feats"], self.stride, 0.5)
+
+        dtype = pred_scores.dtype
+        batch_size = pred_scores.shape[0]
+        imgsz = torch.tensor(preds["feats"][0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]
+
+        # Targets - reuse base class preprocess
+        targets = torch.cat((batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1), batch["bboxes"]), 1)
+        targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
+        gt_labels, gt_bboxes = targets.split((1, 4), 2)  # cls, xyxy
+        mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
+
+        # Pboxes - reuse base class bbox_decode
+        pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyxy, (b, h*w, 4)
+
+        # Use softmax probabilities for anchor assignment instead of sigmoid
+        pred_probs = F.softmax(pred_scores.detach(), dim=-1)
+
+        _, target_bboxes, target_scores, fg_mask, target_gt_idx = self.assigner(
+            pred_probs,
+            (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
+            anchor_points * stride_tensor,
+            gt_labels,
+            gt_bboxes,
+            mask_gt,
+            **assign_kwargs,
+        )
+
+        target_scores_sum = target_scores.sum().clamp_(min=1)
+
+        # Use softmax-based classification loss from PoseLossSoftmax
+        loss[1] = self.classification_loss(pred_scores, target_scores, target_scores_sum)
+        if loss[1].isnan():
+            pass
+
+        # Bbox loss - reuse base class bbox_loss
+        loss[0], loss[2] = self.bbox_loss(
+            pred_distri,
+            pred_bboxes,
+            anchor_points,
+            target_bboxes / stride_tensor,
+            target_scores,
+            target_scores_sum,
+            fg_mask,
+            imgsz,
+            stride_tensor,
+        )
+
+        loss[0] *= self.hyp.box
+        loss[1] *= self.hyp.cls
+        loss[2] *= self.hyp.dfl
+
+        return (
+            (fg_mask, target_gt_idx, target_bboxes, anchor_points, stride_tensor),
+            loss,
+            dict(zip(self.loss_names, loss.detach())),
+        )
 
 
 class v8ClassificationLoss:

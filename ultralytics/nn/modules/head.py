@@ -832,7 +832,11 @@ class PosePico(Pose26):
 
         c4 = max(ch[0] // 4, kpt_shape[0] * (kpt_shape[1] + 2))
         self.cv4 = nn.ModuleList(
-            nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3))
+            nn.Sequential(
+                nn.Sequential(DWConv(x, x, 5), Conv(x, c4, 1)),
+                nn.Sequential(DWConv(c4, c4, 5), Conv(c4, c4, 1))
+            )
+            # nn.Sequential(Conv(x, c4, 5), Conv(c4, c4, 5))
             for x in ch
         )
 
@@ -911,14 +915,20 @@ class PoseAttn(Pose26):
 
 
 class _TverskyProjection2d(nn.Module):
-    """Apply the official TverskyProjection to each spatial position in a BCHW tensor."""
+    """Apply the official TverskyProjection to each spatial position in a BCHW tensor.
+    
+    Uses F.softplus for logit_scale to ensure smooth, non-zero gradients everywhere,
+    avoiding gradient vanishing caused by hard clamp cutoffs. A learnable bias matches
+    the design of ContrastiveHead and BNContrastiveHead.
+    """
 
     def __init__(self, channels: int, num_classes: int):
         super().__init__()
 
         self.in_channels = channels
         self.out_channels = num_classes
-        self.logit_scale = nn.Parameter(torch.tensor(math.log(1 / 1024)))
+        self.logit_scale = nn.Parameter(torch.tensor(0.0))
+        self.bias = nn.Parameter(torch.tensor(-10.0))
         self.projection = TverskyProjection(
             embedding_dim=channels,
             class_count=num_classes,
@@ -929,13 +939,15 @@ class _TverskyProjection2d(nn.Module):
             normalize=True,
         )
 
+    def _get_scale(self) -> torch.Tensor:
+        """Compute the smooth scale from logit_scale using softplus."""
+        return F.softplus(self.logit_scale)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         b, _, h, w = x.shape
         x = x.permute(0, 2, 3, 1).reshape(b, h * w, -1)
         x = self.projection(x)
-        x = x * self.logit_scale.clamp(min=-20.0, max=0.0).exp()
-        # Fixed-scale alternative
-        # x = x * (1 / 1024)
+        x = x * self._get_scale() + self.bias
         return x.reshape(b, h, w, -1).permute(0, 3, 1, 2).contiguous()
 
 
@@ -973,9 +985,13 @@ class PoseTversky(Pose26):
 
 
 class _CosineClassifier(nn.Module):
-    """Normalized cosine classifier that preserves the usual BCHW class-logit shape."""
+    """Normalized cosine classifier that preserves the usual BCHW class-logit shape.
+    
+    Outputs cosine * scale, where cosine is the dot product of L2-normalized features and weights.
+    Used with CrossEntropyLoss in ArcFace-style training, where scale controls the decision boundary sharpness.
+    """
 
-    def __init__(self, channels: int, num_classes: int, scale: float = 16.0):
+    def __init__(self, channels: int, num_classes: int, scale: float = 30.0):
         super().__init__()
         self.weight = nn.Parameter(torch.empty(num_classes, channels))
         self.scale = scale
@@ -998,9 +1014,13 @@ class _CosineClassifier(nn.Module):
 
 
 class PoseAf(Pose26):
-    """Pose head with a normalized cosine classifier in cv3."""
+    """Pose head with a normalized cosine classifier in cv3.
+    
+    Uses ArcFace-style cosine classification with CrossEntropyLoss instead of BCE.
+    The cosine_scale parameter controls the decision boundary sharpness (default 30.0, per ArcFace convention).
+    """
 
-    cosine_scale = 8.0
+    cosine_scale = 30.0
 
     def __init__(
             self,
@@ -1022,6 +1042,25 @@ class PoseAf(Pose26):
         )
         if end2end:
             self.one2one_cv3 = copy.deepcopy(self.cv3)
+
+    def _inference(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
+        """Decode predicted bounding boxes, class probabilities, and keypoints using softmax.
+
+        Overrides Pose._inference to use softmax instead of sigmoid for class probabilities,
+        making inference consistent with ArcFace-style CrossEntropyLoss training.
+        The _CosineClassifier outputs cosine * scale logits, which should be
+        activated with softmax to produce valid class probabilities.
+        Keypoints are decoded and concatenated following the same pattern as Pose._inference.
+
+        Args:
+            x (dict[str, torch.Tensor]): Dictionary of predictions from detection layers.
+
+        Returns:
+            (torch.Tensor): Concatenated tensor of decoded bounding boxes, class probabilities, and keypoints.
+        """
+        dbox = self._get_decode_boxes(x)
+        preds = torch.cat((dbox, F.softmax(x["scores"], dim=1)), 1)
+        return torch.cat([preds, self.kpts_decode(x["kpts"])], dim=1)
 
     def bias_init(self) -> None:
         """Initialize box biases; the cosine classifier has no class bias to initialize."""

@@ -10,24 +10,25 @@ import torch
 from torch import nn
 
 __all__ = (
+    "AKConv",
     "CBAM",
     "ChannelAttention",
     "Concat",
     "Conv",
     "Conv2",
     "ConvTranspose",
+    "DSConv",
     "DWConv",
     "DWConvTranspose2d",
+    "DualConv",
     "Focus",
     "GhostConv",
     "Index",
     "LightConv",
     "RepConv",
-    "SpatialAttention",
-    "DualConv",
-    "AKConv",
-    "TensorAdd",
     "SplitChannels",
+    "SpatialAttention",
+    "TensorAdd",
 )
 
 
@@ -204,6 +205,52 @@ class DWConv(Conv):
             act (bool | nn.Module): Activation function.
         """
         super().__init__(c1, c2, k, s, g=math.gcd(c1, c2), d=d, act=act)
+
+
+class DSConv(nn.Module):
+    """Depthwise Separable Convolution from YOLOv13.
+
+    Standard depthwise separable convolution with separate depthwise and pointwise
+    layers, each followed by batch normalization and SiLU activation. This is the
+    core building block for DS-C3k2 and DSBottleneck in YOLOv13.
+
+    Structure: DWConv2d(c_in, c_in, k, groups=c_in) -> BN -> SiLU -> Conv2d(c_in, c_out, 1) -> BN -> SiLU
+
+    Compared to standard Conv, reduces parameters by ~8x when kernel size is large
+    (e.g., k=5: 25x reduction in DW part, only 1x in PW part).
+    """
+
+    def __init__(self, c1: int, c2: int, k: int = 3, s: int = 1, act: bool = True):
+        """Initialize DSConv layer.
+
+        Args:
+            c1 (int): Number of input channels.
+            c2 (int): Number of output channels.
+            k (int): Kernel size for depthwise convolution.
+            s (int): Stride.
+            act (bool): Whether to use activation function.
+        """
+        super().__init__()
+        # Depthwise convolution: spatial feature extraction
+        self.dw = nn.Conv2d(c1, c1, k, s, autopad(k, None, 1), groups=c1, bias=False)
+        self.dw_bn = nn.BatchNorm2d(c1)
+        self.dw_act = nn.SiLU() if act else nn.Identity()
+        # Pointwise convolution: channel mixing
+        self.pw = nn.Conv2d(c1, c2, 1, 1, 0, bias=False)
+        self.pw_bn = nn.BatchNorm2d(c2)
+        self.pw_act = nn.SiLU() if act else nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through DSConv.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (B, c1, H, W).
+
+        Returns:
+            (torch.Tensor): Output tensor of shape (B, c2, H, W).
+        """
+        x = self.dw_act(self.dw_bn(self.dw(x)))
+        return self.pw_act(self.pw_bn(self.pw(x)))
 
 
 class DWConvTranspose2d(nn.ConvTranspose2d):

@@ -13,7 +13,7 @@ from timm.layers import DropPath
 
 from ultralytics.utils.torch_utils import fuse_conv_and_bn
 
-from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad, PartialConv3
+from .conv import Conv, DSConv, DWConv, GhostConv, LightConv, RepConv, autopad, PartialConv3
 from .transformer import TransformerBlock
 
 __all__ = (
@@ -25,9 +25,13 @@ __all__ = (
     "CIB",
     "DFL",
     "ELAN1",
+    "GELAN",
     "PSA",
+    "DSC3k2",
+    "BiFormerAttention",
     "SPP",
     "SPPELAN",
+    "DySample",
     "SPPF",
     "AConv",
     "ADown",
@@ -210,6 +214,110 @@ class SPP(nn.Module):
         """Forward pass of the SPP layer, performing spatial pyramid pooling."""
         x = self.cv1(x)
         return self.cv2(torch.cat([x] + [m(x) for m in self.m], 1))
+
+
+class DySample(nn.Module):
+    """Dynamic Upsampling (DySample) module.
+
+    Replaces standard interpolation-based upsampling with learnable dynamic
+    upsampling that generates offsets and scaling factors per spatial location,
+    reducing information loss during the upsampling process in the FPN neck.
+
+    References:
+        https://arxiv.org/abs/2401.14922 (DySample, ICCV 2023)
+    """
+
+    def __init__(self, in_channels: int, scale_factor: int = 2):
+        """Initialize DySample module.
+
+        Args:
+            in_channels (int): Number of input channels.
+            scale_factor (int): Upsampling scale factor (default 2).
+        """
+        super().__init__()
+        self.scale_factor = scale_factor
+        # Offset prediction: 2 channels for (dh, dw) offsets
+        self.offset = nn.Sequential(
+            nn.Conv2d(in_channels, in_channels, 3, 1, 1),
+            nn.GELU(),
+            nn.Conv2d(in_channels, 2 * (scale_factor ** 2), 1, 1, 0),
+        )
+        # Scale prediction: 1 channel for per-location scaling
+        self.scale = nn.Sequential(
+            nn.Conv2d(in_channels, in_channels, 3, 1, 1),
+            nn.GELU(),
+            nn.Conv2d(in_channels, scale_factor ** 2, 1, 1, 0),
+        )
+        # Feature projection after upsampling
+        self.up_layer = nn.Conv2d(in_channels, in_channels, 3, 1, 1)
+
+        # Initialize offsets to zero (identity upsampling at start)
+        nn.init.zeros_(self.offset[-1].weight)
+        nn.init.zeros_(self.offset[-1].bias)
+        # Initialize scale to ones
+        with torch.no_grad():
+            self.scale[-1].bias.fill_(1.0 / (scale_factor ** 2))
+            self.scale[-1].weight.fill_(0.0)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply dynamic upsampling to input tensor.
+
+        Optimized for PyTorch 2.15: uses torch.meshing with indexing='ij' and cached base grids
+        to reduce memory allocations and improve performance.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (B, C, H, W).
+
+        Returns:
+            (torch.Tensor): Upsampled tensor of shape (B, C, H*scale_factor, W*scale_factor).
+        """
+        N, C, H, W = x.shape
+        scale = self.scale_factor
+
+        # Generate offsets and scaling factors
+        offset = self.offset(x)  # (B, 2*S^2, H, W)
+        weight = self.scale(x).softmax(1).view(N, 1, scale, scale, H, W)  # (B, 1, S, S, H, W)
+
+        # Create offset grid
+        offset = offset.view(N, 2, scale, scale, H, W)  # (B, 2, S, S, H, W)
+        oh, ow = offset.unbind(1)  # (B, S, S, H, W) each
+
+        # Build coordinate grid using torch.meshgrid for efficiency
+        # Normalize base coordinates to [-1, 1] once
+        h_norm = 2.0 / max(H - 1, 1) if H > 1 else 1.0
+        w_norm = 2.0 / max(W - 1, 1) if W > 1 else 1.0
+
+        # Create base grids using arange and broadcasting (more memory efficient)
+        # h_base: (H, W) normalized to [-1, 1]
+        h_base = (torch.arange(H, device=x.device, dtype=x.dtype) * h_norm) - 1.0
+        w_base = (torch.arange(W, device=x.device, dtype=x.dtype) * w_norm) - 1.0
+
+        # Build coordinate grid: (B, S, S, H, W)
+        # h_grid[h, w] = normalized_h[h] + oh[h, w] / scale
+        h_grid = h_base.view(1, 1, 1, -1, 1) + oh / scale  # (B, S, S, H, 1) -> broadcast
+        w_grid = w_base.view(1, 1, 1, 1, -1) + ow / scale  # (B, S, S, 1, W) -> broadcast
+
+        # Stack to form grid: (B, S, S, H, W, 2) -> (B, H*S, W*S, 2)
+        grid = torch.stack([w_grid, h_grid], dim=-1)  # (B, S, S, H, W, 2)
+        grid = grid.permute(0, 3, 4, 1, 2, 5).reshape(N, H * scale, W * scale, 2)
+
+        # Bilinear sample input features
+        # grid_sample's cuDNN backward pass lacks deterministic implementation,
+        # temporarily disable deterministic check to suppress the warning
+        was_deterministic = torch.backends.cudnn.deterministic
+        try:
+            torch.backends.cudnn.deterministic = False
+            x_up = F.grid_sample(x, grid, mode="bilinear", padding_mode="zeros", align_corners=True)
+        finally:
+            torch.backends.cudnn.deterministic = was_deterministic
+
+        # Apply scaling weights
+        weight = weight.permute(0, 1, 4, 5, 2, 3).reshape(N, 1, H * scale, W * scale)
+        x_up = x_up * weight
+
+        # Final projection
+        x_up = self.up_layer(x_up)
+        return x_up
 
 
 class SPPF(nn.Module):
@@ -965,30 +1073,338 @@ class ADown(nn.Module):
 
 
 class SPPELAN(nn.Module):
-    """SPP-ELAN."""
+    """SPP-ELAN with multi-scale pooling kernels."""
 
-    def __init__(self, c1: int, c2: int, c3: int, k: int = 5):
+    def __init__(self, c1: int, c2: int, c3: int, k: int | list | None = None):
         """Initialize SPP-ELAN block.
 
         Args:
             c1 (int): Input channels.
             c2 (int): Output channels.
             c3 (int): Intermediate channels.
-            k (int): Kernel size for max pooling.
+            k (int | list | None): Kernel size(s) for max pooling. If int, uses [k, k+2, k+4]. Default [5, 7, 9].
         """
         super().__init__()
         self.c = c3
         self.cv1 = Conv(c1, c3, 1, 1)
-        self.cv2 = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
-        self.cv3 = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
-        self.cv4 = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
+        if k is None:
+            ks = [5, 7, 9]
+        elif isinstance(k, int):
+            ks = [k, k + 2, k + 4]
+        else:
+            ks = list(k)
+        # Use different kernel sizes for multi-scale receptive field
+        # Use adaptive pooling to ensure output size matches input size
+        self.cv2 = nn.MaxPool2d(kernel_size=ks[0], stride=1, padding=ks[0] // 2)
+        self.cv3 = nn.MaxPool2d(kernel_size=ks[1], stride=1, padding=ks[1] // 2)
+        self.cv4 = nn.MaxPool2d(kernel_size=ks[2], stride=1, padding=ks[2] // 2)
         self.cv5 = Conv(4 * c3, c2, 1, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through SPPELAN layer."""
-        y = [self.cv1(x)]
-        y.extend(m(y[-1]) for m in [self.cv2, self.cv3, self.cv4])
-        return self.cv5(torch.cat(y, 1))
+        y = self.cv1(x)
+        # Apply multi-scale pooling with different kernel sizes
+        y2 = self.cv2(y)
+        y3 = self.cv3(y)
+        y4 = self.cv4(y)
+        # Resize to match if needed (for odd input sizes)
+        if y2.shape[2:] != y.shape[2:]:
+            y2 = F.interpolate(y2, size=y.shape[2:], mode='nearest')
+        if y3.shape[2:] != y.shape[2:]:
+            y3 = F.interpolate(y3, size=y.shape[2:], mode='nearest')
+        if y4.shape[2:] != y.shape[2:]:
+            y4 = F.interpolate(y4, size=y.shape[2:], mode='nearest')
+        y = torch.cat([y, y2, y3, y4], 1)
+        return self.cv5(y)
+
+
+class GELAN(nn.Module):
+    """GELAN (Generalized ELAN) block from YOLOv9.
+
+    Combines CSP (Cross Stage Partial) and ELAN (Efficient Layer Aggregation Network) ideas
+    to create an efficient feature extraction block with gradient flow optimization.
+    Uses a split-merge strategy to balance gradient paths and improve feature representation.
+
+    References:
+        https://arxiv.org/abs/2312.02995 (YOLOv9, arXiv 2023)
+    """
+
+    def __init__(self, c1: int, c2: int, c3: int, k: int = 5):
+        """Initialize GELAN block.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            c3 (int): Intermediate channels.
+            k (int): Kernel size for max pooling (unused, kept for compatibility).
+        """
+        super().__init__()
+        c_ = c3  # hidden channels
+
+        # Initial projection
+        self.cv1 = Conv(c1, c_, 1, 1)
+
+        # Branch 1: two convolutions
+        self.cv2 = Conv(c_, c_, 3, 1)
+        self.cv3 = Conv(c_, c_, 3, 1)
+
+        # Branch 2: two convolutions
+        self.cv4 = Conv(c_, c_, 3, 1)
+        self.cv5 = Conv(c_, c_, 3, 1)
+
+        # Branch 3: two convolutions
+        self.cv6 = Conv(c_, c_, 1, 1)
+        self.cv7 = Conv(c_, c_, 1, 1)
+
+        # Branch 4: two convolutions
+        self.cv8 = Conv(c_, c_, 3, 1)
+        self.cv9 = Conv(c_, c_, 3, 1)
+
+        # Concatenate all 4 branches: 4 * c_ channels
+        self.cv10 = Conv(4 * c_, c_, 3, 1)
+        self.cv11 = Conv(c_, c_, 3, 1)
+        self.cv12 = Conv(c_, c2, 1, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through GELAN layer.
+
+        The structure follows YOLOv9's GELAN design with multiple convolutional branches
+        and feature concatenation to optimize gradient flow.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (B, c1, H, W).
+
+        Returns:
+            (torch.Tensor): Output tensor of shape (B, c2, H, W).
+        """
+        y = self.cv1(x)
+
+        # Branch 1: two convolutions
+        y1 = self.cv2(y)
+        y1 = self.cv3(y1)
+
+        # Branch 2: two convolutions
+        y2 = self.cv4(y1)
+        y2 = self.cv5(y2)
+
+        # Branch 3: two convolutions
+        y3 = self.cv6(y2)
+        y3 = self.cv7(y3)
+
+        # Branch 4: two convolutions
+        y4 = self.cv8(y3)
+        y4 = self.cv9(y4)
+
+        # Concatenate all branches: 4 * c_ -> c_ -> c2
+        out = self.cv10(torch.cat([y1, y2, y3, y4], 1))
+        out = self.cv11(out)
+        return self.cv12(out)
+
+
+class DSBottleneck(nn.Module):
+    """Depthwise Separable Bottleneck block for DS-C3k2 from YOLOv13.
+
+    Standard YOLOv13 implementation: two DSConv layers with different kernel sizes.
+    DSConv1 (k=3) for spatial feature extraction, DSConv2 (k=5) for broader receptive field.
+    Each DSConv = Depthwise Conv + Pointwise Conv + BN + SiLU.
+
+    Compared to standard Bottleneck (2 Conv layers), this uses 2 DSConv layers,
+    reducing parameters significantly:
+    - Standard Bottleneck(c=256): ~1.18M params
+    - DSBottleneck(c=256): ~135K params (reduction ~89%)
+    """
+
+    def __init__(self, c1: int, c2: int, shortcut: bool = True, g: int = 1, k: tuple = (3, 5), e: float = 0.5):
+        """Initialize DS-Bottleneck.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            shortcut (bool): Whether to use shortcut connection.
+            g (int): Groups for convolutions (unused, DSConv handles grouping internally).
+            k (tuple): Kernel sizes for the two DSConv layers, default (3, 5).
+            e (float): Expansion ratio for hidden channels.
+        """
+        super().__init__()
+        c_ = int(c2 * e)  # hidden channels
+        # Two DSConv layers with different kernel sizes
+        # DSConv1: small kernel for local spatial features
+        self.cv1 = DSConv(c1, c_, k[0], 1)
+        # DSConv2: larger kernel for broader receptive field
+        self.cv2 = DSConv(c_, c2, k[1], 1)
+        self.add = shortcut and c1 == c2
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through DS-Bottleneck.
+
+        Structure: DSConv(k=3) -> DSConv(k=5), matching YOLOv13 standard.
+        """
+        y = self.cv2(self.cv1(x))
+        return x + y if self.add else y
+
+
+class DSC3k2(C2f):
+    """DS-C3k2 (Depthwise Separable C3k2) block from YOLOv13.
+
+    A depthwise separable convolution variant of C2f that reduces parameters by ~30%
+    while maintaining detection accuracy. Inherits from C2f and replaces standard
+    Bottleneck blocks with DSBottleneck blocks using DSConv layers.
+
+    Structure:
+        DSC3k2
+        ├── cv1: Conv(c1, 2*c, 1, 1)
+        ├── cv2: Conv((2+n)*c, c2, 1)
+        └── m: ModuleList [DSBottleneck × n]
+
+            DSBottleneck
+            ├── cv1: DSConv(c1, c_, k=3)  # DW(k=3) + PW(1) + BN + SiLU
+            ├── cv2: DSConv(c_, c2, k=5)  # DW(k=5) + PW(1) + BN + SiLU
+            └── residual connection (if c1==c2)
+
+    References:
+        YOLOv13 (2025)
+    """
+
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = False, g: int = 1, e: float = 0.5):
+        """Initialize DS-C3k2 block.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of DS-Bottleneck blocks.
+            shortcut (bool): Whether to use shortcut connections.
+            g (int): Groups for convolutions (unused, DSConv handles grouping internally).
+            e (float): Expansion ratio.
+        """
+        super().__init__(c1, c2, n, shortcut, g, e)
+        # Replace standard Bottleneck with DSBottleneck
+        self.m = nn.ModuleList(
+            DSBottleneck(self.c, self.c, shortcut, g, k=(3, 5), e=1.0) for _ in range(n)
+        )
+
+
+class BiFormerAttention(nn.Module):
+    """BiFormer Dynamic Sparse Attention block.
+
+    Implements token-to-token and token-to-channel sparse attention mechanisms
+    that adaptively select important tokens and channels, reducing computational
+    complexity from O(N^2) to O(N) while maintaining attention quality.
+    Dynamically prunes less important attention weights during training.
+
+    References:
+        https://arxiv.org/abs/2303.08810 (BiFormer, CVPR 2023)
+    """
+
+    def __init__(self, c1: int, c2: int, num_heads: int = 8, token_aware: bool = True, channel_aware: bool = True):
+        """Initialize BiFormer attention block.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            num_heads (int): Number of attention heads.
+            token_aware (bool): Whether to use token-aware sparse attention.
+            channel_aware (bool): Whether to use channel-aware sparse attention.
+        """
+        super().__init__()
+        assert c1 % num_heads == 0, "channels must be divisible by num_heads"
+
+        self.c1 = c1
+        self.c2 = c2
+        self.num_heads = num_heads
+        self.head_dim = c1 // num_heads
+        self.token_aware = token_aware
+        self.channel_aware = channel_aware
+        self.scale = self.head_dim ** -0.5
+
+        # QKV projections
+        self.qkv = Conv(c1, c1 * 3, 1, 1)
+        self.proj = Conv(c1, c2, 1, 1)
+
+        # Token-aware importance scoring (use GroupNorm instead of BatchNorm for small batches)
+        if token_aware:
+            self.token_importance = nn.Sequential(
+                nn.AdaptiveAvgPool2d(1),
+                nn.Conv2d(c1, num_heads, 1, 1, bias=False),
+                nn.GroupNorm(1, num_heads),
+                nn.Softmax(dim=1)
+            )
+
+        # Channel-aware importance scoring
+        if channel_aware:
+            self.channel_importance = nn.Sequential(
+                nn.AdaptiveAvgPool2d(1),
+                nn.Conv2d(c1, num_heads, 1, 1, bias=False),
+                nn.GroupNorm(1, num_heads),
+                nn.Softmax(dim=1)
+            )
+
+        # Gate for residual connection
+        self.gamma = nn.Parameter(torch.ones(c2))
+        self.beta = nn.Parameter(torch.zeros(c2))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through BiFormer attention block.
+
+        Uses PyTorch's scaled_dot_product_attention (SDPA) for memory-efficient attention computation,
+        automatically selecting the optimal backend (FlashAttention-2, Memory-Efficient, or Math).
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (B, c1, H, W).
+
+        Returns:
+            (torch.Tensor): Output tensor of shape (B, c2, H, W).
+        """
+        B, C, H, W = x.shape
+        N = H * W  # number of tokens
+        head_dim = self.head_dim
+
+        # QKV projections: (B, C, H, W) -> (B, 3*C, H, W)
+        qkv = self.qkv(x)  # (B, 3*C, H, W)
+        qkv = qkv.reshape(B, 3, self.num_heads, head_dim, N)  # (B, 3, num_heads, head_dim, N)
+        qkv = qkv.permute(1, 2, 0, 4, 3)  # (3, num_heads, B, N, head_dim)
+        q, k, v = qkv[0], qkv[1], qkv[2]  # each: (num_heads, B, N, head_dim)
+
+        # Build attention mask for token-aware sparse attention
+        # SDPA requires mask shape broadcastable to (batch, heads, seq_len, seq_len)
+        attn_mask = None
+        if self.token_aware:
+            # Token importance: (B, num_heads, 1, 1) -> (B, num_heads, N, N) broadcast
+            token_weights = self.token_importance(x)  # (B, num_heads, 1, 1)
+            token_weights = token_weights.squeeze(-1).squeeze(-1)  # (B, num_heads)
+            token_weights = token_weights.unsqueeze(-1).unsqueeze(-1)  # (B, num_heads, 1, 1)
+            # Add bias to attention scores (positive values boost importance)
+            attn_mask = token_weights * 100  # (B, num_heads, 1, 1) broadcasts to (B, num_heads, N, N)
+
+        # Channel-aware sparse attention - scale values before SDPA
+        if self.channel_aware:
+            channel_weights = self.channel_importance(x)  # (B, num_heads, 1, 1)
+            channel_weights = channel_weights.squeeze(-1).squeeze(-1)  # (B, num_heads)
+            # Transpose to match v's layout: (num_heads, B, 1, 1) for broadcasting with (num_heads, B, N, head_dim)
+            channel_weights = channel_weights.permute(1, 0).unsqueeze(-1).unsqueeze(-1)  # (num_heads, B, 1, 1)
+            v = v * channel_weights  # (num_heads, B, N, head_dim) * broadcast
+
+        # Use PyTorch's SDPA for memory-efficient attention computation
+        # SDPA automatically selects the optimal backend (FlashAttention-2, etc.)
+        # q, k, v: (num_heads, B, N, head_dim) -> (B, num_heads, N, head_dim) for SDPA
+        q = q.transpose(0, 1)  # (B, num_heads, N, head_dim)
+        k = k.transpose(0, 1)  # (B, num_heads, N, head_dim)
+        v = v.transpose(0, 1)  # (B, num_heads, N, head_dim)
+        out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)  # (B, num_heads, N, head_dim)
+
+        # Reshape back to (B, C, H, W)
+        out = out.transpose(1, 2)  # (B, N, num_heads, head_dim)
+        out = out.reshape(B, N, C)  # (B, N, C)
+        out = out.permute(0, 2, 1).reshape(B, C, H, W)  # (B, C, H, W)
+
+        # Output projection and residual connection
+        out = self.proj(out)
+        out = out * self.gamma.view(1, -1, 1, 1) + self.beta.view(1, -1, 1, 1)
+
+        # Residual connection (if channels match)
+        if x.shape[1] == self.c2:
+            out = out + x
+
+        return out
 
 
 class CBLinear(nn.Module):

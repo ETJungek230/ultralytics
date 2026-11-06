@@ -52,9 +52,13 @@ def difference_measure(dot_a_m, dot_b_m, ind_a, ind_b, reduction):
     raise ValueError(f"Unknown difference reduction: {reduction!r}")
 
 
-def _project(x, fbank, threshold):
-    """Project inputs onto the feature bank and return scores, masked scores, and indicators."""
-    dot = x @ fbank.transpose(-2, -1)
+def _project(x, fbank_T, threshold):
+    """Project inputs onto the feature bank using a pre-transposed fbank.
+    
+    Accepts fbank_T (already transposed) to avoid redundant transpose operations
+    when the same fbank is used for multiple inputs.
+    """
+    dot = x @ fbank_T
     ind = dot > threshold
     return dot, dot * ind, ind
 
@@ -67,8 +71,10 @@ def similarity_contrast_model(
         x = F.normalize(x, dim=-1)
         y = F.normalize(y, dim=-1)
 
-    _, dot_x_m, ind_x = _project(x, fbank, threshold)
-    _, dot_y_m, ind_y = _project(y, fbank, threshold)
+    # Cache fbank transpose to avoid redundant operations when projecting x and y
+    fbank_T = fbank.transpose(-2, -1)
+    _, dot_x_m, ind_x = _project(x, fbank_T, threshold)
+    _, dot_y_m, ind_y = _project(y, fbank_T, threshold)
     inter = intersection_measure(dot_x_m, dot_y_m, ind_x, ind_y, intersection_reduction)
     diff_xy = difference_measure(dot_x_m, dot_y_m, ind_x, ind_y, difference_reduction)
     diff_yx = difference_measure(dot_y_m, dot_x_m, ind_y, ind_x, difference_reduction)
@@ -83,8 +89,10 @@ def similarity_ratio_model(
         x = F.normalize(x, dim=-1)
         y = F.normalize(y, dim=-1)
 
-    _, dot_x_m, ind_x = _project(x, fbank, threshold)
-    _, dot_y_m, ind_y = _project(y, fbank, threshold)
+    # Cache fbank transpose to avoid redundant operations when projecting x and y
+    fbank_T = fbank.transpose(-2, -1)
+    _, dot_x_m, ind_x = _project(x, fbank_T, threshold)
+    _, dot_y_m, ind_y = _project(y, fbank_T, threshold)
     inter = intersection_measure(dot_x_m, dot_y_m, ind_x, ind_y, intersection_reduction)
     diff_xy = difference_measure(dot_x_m, dot_y_m, ind_x, ind_y, difference_reduction)
     diff_yx = difference_measure(dot_y_m, dot_x_m, ind_y, ind_x, difference_reduction)
