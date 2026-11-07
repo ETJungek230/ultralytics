@@ -17,50 +17,59 @@ from .conv import Conv, DSConv, DWConv, GhostConv, LightConv, RepConv, autopad, 
 from .transformer import TransformerBlock
 
 __all__ = (
+    "A2C2f",
+    "A2C2fWithCBAM",
+    "AConv",
+    "ADown",
+    "AAttn",
+    "ABlock",
+    "Attention",
+    "BNContrastiveHead",
+    "BiFormerAttention",
+    "Bottleneck",
+    "BottleneckCSP",
     "C1",
     "C2",
     "C2PSA",
-    "C3",
-    "C3TR",
-    "CIB",
-    "DFL",
-    "ELAN1",
-    "GELAN",
-    "PSA",
-    "DSC3k2",
-    "BiFormerAttention",
-    "SPP",
-    "SPPELAN",
-    "DySample",
-    "SPPF",
-    "AConv",
-    "ADown",
-    "Attention",
-    "BNContrastiveHead",
-    "Bottleneck",
-    "BottleneckCSP",
     "C2f",
     "C2fAttn",
     "C2fCIB",
     "C2fPSA",
+    "C3",
     "C3Ghost",
     "C3k2",
     "C3k2K",
+    "C3TR",
     "C3x",
-    "PConvC3k2",
     "CBFuse",
     "CBLinear",
+    "CIB",
     "ContrastiveHead",
+    "DFL",
+    "DSC3k2",
+    "DySample",
+    "ELAN1",
+    "GELAN",
     "GhostBottleneck",
     "HGBlock",
     "HGStem",
     "ImagePoolingAttn",
+    "MultiScaleFeatureFusion",
+    "PConvC3k2",
+    "PSA",
     "Proto",
+    "RealNVP",
     "RepC3",
     "RepNCSPELAN4",
     "RepVGGDW",
     "ResNetLayer",
+    "SAVPE",
     "SCDown",
+    "SmallObjectAttention",
+    "SPP",
+    "SPPELAN",
+    "SPPF",
+    "SwiGLUFFN",
     "TorchVision",
 )
 
@@ -2759,3 +2768,166 @@ class RealNVP(nn.Module):
         z, log_det = self.backward_p(x)
         # Closed-form log N(z; 0, I) in 2-D; fp32 keeps z**2 from overflowing under AMP.
         return -0.5 * (z.float() ** 2).sum(-1) - math.log(2 * math.pi) + log_det
+
+
+class SmallObjectAttention(nn.Module):
+    """Small object dedicated attention module.
+
+    Designed for small object detection tasks:
+    1. Uses small convolution kernels to capture local details
+    2. Combines channel and spatial attention
+    3. Multi-scale feature fusion
+
+    Args:
+        c1 (int): Number of input channels.
+    """
+
+    def __init__(self, c1: int):
+        super().__init__()
+        c_ = c1 // 2
+
+        # Local detail capture
+        self.local = nn.Sequential(
+            DWConv(c1, c_, 3),
+            Conv(c_, c_, 1),
+        )
+
+        # Channel attention (SE-like)
+        self.channel_attn = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            Conv(c1, max(c_ // 2, 1), 1),
+            nn.ReLU(inplace=True),
+            Conv(max(c_ // 2, 1), c1, 1),
+            nn.Sigmoid(),
+        )
+
+        # Spatial attention
+        self.spatial_attn = nn.Sequential(
+            nn.Conv2d(2, 1, 7, padding=3, bias=False),
+            nn.Sigmoid(),
+        )
+
+        # Project local features to match channel count for fusion
+        self.fuse_proj = Conv(c_, c1, 1)
+
+        # Final residual connection
+        self.residual = Conv(c1, c1, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply small object attention to input tensor.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (B, C, H, W).
+
+        Returns:
+            (torch.Tensor): Attention-weighted output tensor of shape (B, C, H, W).
+        """
+        # Channel attention
+        channel_out = x * self.channel_attn(x)
+
+        # Spatial attention
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        spatial_out = x * self.spatial_attn(torch.cat([avg_out, max_out], dim=1))
+
+        # Local features (projected to match channel count)
+        local_feat = self.fuse_proj(self.local(x))
+
+        # Fusion: combine attention-enhanced features with local features
+        out = self.residual(channel_out + spatial_out + local_feat)
+        return out + x  # Residual connection
+
+
+class A2C2fWithCBAM(nn.Module):
+    """A2C2f module integrated with CBAM attention.
+
+    Adds CBAM attention after A2C2f output to further enhance feature representation.
+
+    Args:
+        c1 (int): Number of input channels.
+        c2 (int): Number of output channels.
+        n (int): Number of ABlock repetitions.
+        a2 (bool): Whether to use Area Attention.
+        area (int): Number of areas for region division.
+        residual (bool): Learnable residual scaling.
+        mlp_ratio (float): MLP expansion ratio.
+        e (float): Hidden channel ratio.
+    """
+
+    def __init__(
+        self,
+        c1: int,
+        c2: int,
+        n: int = 1,
+        a2: bool = True,
+        area: int = 2,
+        residual: bool = True,
+        mlp_ratio: float = 2.0,
+        e: float = 0.5,
+    ):
+        super().__init__()
+        self.a2c2f = A2C2f(c1, c2, n, a2, area, residual, mlp_ratio, e)
+        from .conv import CBAM
+
+        self.cbam = CBAM(c2)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through A2C2f and CBAM.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            (torch.Tensor): Output tensor after A2C2f and CBAM processing.
+        """
+        out = self.a2c2f(x)
+        return self.cbam(out)
+
+
+class MultiScaleFeatureFusion(nn.Module):
+    """Multi-scale feature fusion module.
+
+    Used in the Neck part to fuse features from different scales, enhancing small object detection.
+    Automatically upsamples all features to match the highest resolution feature map.
+
+    Args:
+        c1 (list[int]): List of input channel dimensions.
+        c2 (int): Number of output channels.
+    """
+
+    def __init__(self, c1: list, c2: int):
+        super().__init__()
+        self.convs = nn.ModuleList([Conv(c, c2 // len(c1), 1) for c in c1])
+        self.fusion = nn.Sequential(
+            Conv(c2, c2, 3, g=max(c2 // 16, 1)),  # Depth-wise separable convolution
+            Conv(c2, c2, 1),
+        )
+        self.attn = SmallObjectAttention(c2)
+
+    def forward(self, features: list) -> torch.Tensor:
+        """Fuse multi-scale features.
+
+        Args:
+            features (list[torch.Tensor]): List of feature tensors from different scales.
+
+        Returns:
+            (torch.Tensor): Fused feature tensor at the highest resolution.
+        """
+        # Find target size (largest spatial dimension)
+        target_h, target_w = 0, 0
+        for f in features:
+            target_h = max(target_h, f.shape[2])
+            target_w = max(target_w, f.shape[3])
+
+        # Align all features to target size via nearest interpolation
+        aligned = []
+        for conv, f in zip(self.convs, features):
+            out = conv(f)
+            if out.shape[2] != target_h or out.shape[3] != target_w:
+                out = F.interpolate(out, size=(target_h, target_w), mode="nearest")
+            aligned.append(out)
+
+        # Concatenate and fuse
+        fused = torch.cat(aligned, dim=1)
+        fused = self.fusion(fused)
+        return self.attn(fused)

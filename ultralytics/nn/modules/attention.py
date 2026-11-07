@@ -131,3 +131,47 @@ class CA(nn.Module):
         attn_h = self.attn_h(y_h)  # (B, C, H, 1)
 
         return x * attn_w * attn_h
+
+
+class EMA(nn.Module):
+    """Efficient Multi-scale Attention (EMA).
+
+    Captures inter-channel dependencies across multiple scales efficiently.
+    Reference: "EMA: Efficient Multi-scale Attention for High-Resolution Visual Recognition" (CVPR 2023)
+
+    Args:
+        channels (int): Number of input channels.
+        k (list[int]): Multi-scale group sizes, default [1, 2, 4, 8].
+        reduction (float): Channel reduction ratio, default 0.25.
+    """
+
+    def __init__(self, channels: int, k: list = None, reduction: float = 0.25):
+        super().__init__()
+        if k is None:
+            k = [1, 3, 5, 7]
+        self.k = k
+
+        c_ = max(int(channels * reduction), 16)
+        self.project = nn.Conv2d(channels, c_ * len(k), 1)
+        self.gates = nn.ModuleList(
+            [nn.Conv2d(c_, c_, k, padding=k // 2) for k in self.k]
+        )
+        self.merge = nn.Conv2d(c_ * len(k), channels, 1)
+        self.gateway = nn.Conv2d(channels, channels, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply EMA to input tensor.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (B, C, H, W).
+
+        Returns:
+            (torch.Tensor): Attention-weighted output tensor of shape (B, C, H, W).
+        """
+        # Split into multiple scales
+        scales = self.project(x).chunk(len(self.k), dim=1)
+        scales = [gate(scale) for gate, scale in zip(self.gates, scales)]
+        # Merge and gate
+        out = self.merge(torch.cat(scales, dim=1))
+        gate = torch.sigmoid(self.gateway(x))
+        return out * gate + x

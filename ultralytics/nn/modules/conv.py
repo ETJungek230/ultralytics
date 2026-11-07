@@ -899,8 +899,9 @@ class AKConv(nn.Module):
 
     @staticmethod
     def _set_lr(module, grad_input, grad_output):
-        grad_input = (grad_input[i] * 0.1 for i in range(len(grad_input)))
-        grad_output = (grad_output[i] * 0.1 for i in range(len(grad_output)))
+        grad_input = tuple(g * 0.1 for g in grad_input)
+        grad_output = tuple(g * 0.1 for g in grad_output)
+        return (grad_input, grad_output)
 
     def forward(self, x):
         # N is num_param.

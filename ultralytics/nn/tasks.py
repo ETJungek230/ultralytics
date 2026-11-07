@@ -34,8 +34,11 @@ from ultralytics.nn.modules import (
     SPPELAN,
     SPPF,
     A2C2f,
+    A2C2fWithCBAM,
     AConv,
     ADown,
+    MultiScaleFeatureFusion,
+    SmallObjectAttention,
     Bottleneck,
     BottleneckCSP,
     C2f,
@@ -402,8 +405,15 @@ class BaseModel(torch.nn.Module):
                     continue  # Preserve custom Tversky classifiers; compatible state_dict keys load below.
                 if any(len(d) != len(s) for d, s in zip(dst, src)):
                     continue  # Different branch layouts (e.g. Detect vs PoseSoftmax) load their shared state keys below.
+                # Only transfer cv3 weights when in_channels differ between dst and src branches.
+                # When in_channels match (same structure), weights are loaded directly via state_dict intersect below.
                 if not any(_cls_in_channels(d[-1]) != _cls_in_channels(s[-1]) for d, s in zip(dst, src)):
-                    continue
+                    # in_channels match: check if out_channels also match for all branches
+                    if all(_cls_out_channels(d[-1]) == _cls_out_channels(s[-1]) for d, s in zip(dst, src)) and \
+                       all(type(d[-1]) is type(s[-1]) for d, s in zip(dst, src)):
+                        continue  # Identical structure — state_dict intersect handles it
+                    # out_channels or type differs but in_channels match: need to transfer with class count adjustment
+                    # Fall through to transfer logic below
                 src = deepcopy(src)
                 for s, d in zip(src, dst):
                     src_last, dst_last = s[-1], d[-1]
@@ -2229,6 +2239,7 @@ def parse_model(d, ch, verbose=True):
             SCDown,
             C2fCIB,
             A2C2f,
+            A2C2fWithCBAM,
             MultiClassify,
             LCNetBlock,
         }
@@ -2253,6 +2264,7 @@ def parse_model(d, ch, verbose=True):
             C2fCIB,
             C2PSA,
             A2C2f,
+            A2C2fWithCBAM,
         }
     )
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
@@ -2292,7 +2304,7 @@ def parse_model(d, ch, verbose=True):
                 legacy_inferred = False
                 if scale in {"m", "l", "x"}:
                     args[3:4] = [True]  # slice assignment also supplies c3k when the YAML omits it
-            if m is A2C2f:
+            if m is A2C2f or m is A2C2fWithCBAM:
                 legacy_inferred = False
                 if scale in {"l", "x"}:  # for L/X sizes
                     args.extend((True, 1.2))
