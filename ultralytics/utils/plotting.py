@@ -495,7 +495,8 @@ class Annotator:
             box = box.tolist()
 
         multi_points = isinstance(box[0], list)  # multiple points with shape (n, 2)
-        p1 = [int(b) for b in box[0]] if multi_points else (int(box[0]), int(box[1]))
+        # Polygon labels sit above the enclosing box's top-left corner, like axis-aligned box labels
+        p1 = tuple(max(int(v), 0) for v in np.min(box, 0)) if multi_points else (int(box[0]), int(box[1]))
         cv2.polylines(self.im, [np.asarray(box, dtype=int)], True, color, self.lw) if multi_points else cv2.rectangle(
             self.im, p1, (int(box[2]), int(box[3])), color, thickness=self.lw, lineType=cv2.LINE_AA
         )
@@ -827,7 +828,8 @@ def save_one_box(
 
     This function takes a bounding box and an image, and then saves a cropped portion of the image according to the
     bounding box. Optionally, the crop can be squared, and the function allows for gain and padding adjustments to the
-    bounding box.
+    bounding box. Multispectral JPEGs preview the first three channels; returned crops retain all channels, in their
+    original order with BGR=True or reversed otherwise.
 
     Args:
         xyxy (torch.Tensor | list): A bounding box in xyxy format, or (4, 2) OBB corners for a rotation-aligned crop.
@@ -853,6 +855,7 @@ def save_one_box(
     xyxy = torch.as_tensor(xyxy, dtype=torch.float32)  # float so integer boxes keep fractional centers and gain/pad
     if xyxy.shape[-2:] == (4, 2):  # OBB corners: warp the box upright at its size, then crop the whole warp below
         p = xyxy.reshape(4, 2).cpu().numpy()
+        p = np.roll(p, 2 - int((np.roll(p[:, 0], 1) - p[:, 0]).argmax()), 0)  # top edge spanning furthest right
         w, h = (max(round(float(np.linalg.norm(p[0] - p[i]))), 1) for i in (3, 1))
         M = cv2.getAffineTransform(p[:3], np.float32([[w, h], [w, 0], [0, 0]]))
         im, xyxy = cv2.warpAffine(im, M, (w, h)).reshape(h, w, -1), torch.tensor([0.0, 0.0, w, h])
@@ -868,7 +871,7 @@ def save_one_box(
         file.parent.mkdir(parents=True, exist_ok=True)  # make directory
         f = str(increment_path(file.with_suffix(".jpg")))
         # cv2.imwrite(f, crop)  # save BGR, https://github.com/ultralytics/yolov5/issues/7007 chroma subsampling issue
-        im_save = crop.reshape(crop.shape[:2]) if grayscale else crop[..., ::-1]
+        im_save = crop.reshape(crop.shape[:2]) if grayscale else crop[..., :3][..., ::-1]
         Image.fromarray(im_save).save(f, quality=95, subsampling=0)  # save RGB
     return crop if BGR or grayscale else crop[..., ::-1]
 

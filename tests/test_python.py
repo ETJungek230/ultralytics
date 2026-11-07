@@ -341,6 +341,58 @@ def test_model_forward(cfg):
     model(source=None, imgsz=32, augment=True)  # also test no source and augment
 
 
+def test_tiled_prediction_single_window():
+    """A full-image tile must preserve NMS-free predictions even when they overlap above IoU 0.5."""
+    model = YOLO(MODEL)
+    image = cv2.resize(cv2.imread(str(SOURCE)), (640, 640))
+    args = {"imgsz": 640, "iou": 0.9, "conf": 0.1, "device": "cpu", "verbose": False}
+    expected = model(image, tile=False, **args)[0]
+    actual = model(image, tile=640, **args)[0]
+    assert torch.equal(expected.boxes.data, actual.boxes.data)
+    batches = []
+    model.add_callback("on_predict_batch_start", lambda p: batches.append([im.shape for im in p.batch[1]]))
+    model([image, image[:256, :256]], tile=320, **args)
+    assert batches == [[image.shape, (256, 256, 3)]]
+
+
+def test_tiled_merge_drops_seam_fragments():
+    """A box cut by a window edge is dropped when a neighboring window holds the whole object."""
+    from ultralytics.utils.ops import merge_tiles
+
+    windows = [(0, 0, 100, 100), (60, 0, 160, 100)]
+    predictions = [  # window 0 sees the left 30 px of an object at x=70-110; window 1 sees it whole
+        {
+            "bboxes": torch.tensor([[70.0, 10, 100, 30], [5, 5, 20, 20]]),
+            "conf": torch.tensor([0.9, 0.8]),
+            "cls": torch.zeros(2),
+        },
+        {"bboxes": torch.tensor([[10.0, 10, 50, 30]]), "conf": torch.tensor([0.7]), "cls": torch.zeros(1)},
+    ]
+    out = merge_tiles(predictions, windows, (100, 160), iou=0.7, agnostic=False, max_det=300)
+    assert sorted(out["bboxes"].tolist()) == [[5.0, 5.0, 20.0, 20.0], [70.0, 10.0, 110.0, 30.0]]
+
+
+def test_tiled_dataset_targets(tmp_path):
+    """Crop native pixels and targets before formatting, without retaining full-image backing allocations."""
+    from ultralytics.data.dataset import YOLODataset
+
+    images, labels = tmp_path / "images", tmp_path / "labels"
+    images.mkdir()
+    labels.mkdir()
+    cv2.imwrite(str(images / "image.png"), np.full((64, 128, 3), [10, 20, 240], dtype=np.uint8))
+    (labels / "image.txt").write_text("0 0.75 0.5 0.25 0.5\n")
+    dataset = YOLODataset(img_path=str(images), data={"names": {0: "object"}}, imgsz=64, tile=64, augment=False)
+    first, last = dataset[0], dataset[len(dataset) - 1]
+    assert first["img"][:, 32, 32].tolist() == [240, 20, 10]
+    assert len(first["cls"]) == 0
+    assert torch.allclose(last["bboxes"], torch.tensor([[0.5, 0.5, 0.5, 0.5]]))
+    crop, _, _ = dataset.load_image(len(dataset) - 1)
+    assert crop.base is None
+    full = dataset.get_image_and_label(0, full=True)
+    assert full["img"].shape == (64, 128, 3)
+    np.testing.assert_allclose(full["instances"].bboxes, [[0.75, 0.5, 0.25, 0.5]])
+
+
 def test_model_methods():
     """Test various methods and properties of the YOLO model to ensure correct functionality."""
     model = YOLO(MODEL)
