@@ -531,14 +531,24 @@ def strip_qat(model: nn.Module) -> None:
 
 
 def restore_qat(model: nn.Module, state: dict[str, Any]) -> None:
-    """Re-apply the fake-quantization captured by `qat_state` to a model, in place."""
+    """Re-apply the fake-quantization captured by `qat_state` to a model, in place.
+
+    If the quantizer state does not match the current model structure (e.g. after cv3
+    branch reconstruction in the weight transfer logic), a warning is logged and the
+    model falls back to non-quantized loading.
+    """
     model = getattr(model, "student_model", model)  # distillation checkpoints quantize only the student
     check_requirements(MODELOPT_REQUIREMENTS)
     import modelopt.torch.opt as mto
 
-    mto.restore_from_modelopt_state(model, state["modelopt"])
-    model.to(next(model.parameters()).device)
-    model.load_state_dict(state["ranges"], strict=False)
+    try:
+        mto.restore_from_modelopt_state(model, state["modelopt"])
+        model.to(next(model.parameters()).device)
+        model.load_state_dict(state["ranges"], strict=False)
+    except Exception as e:
+        # Quantizer state mismatch — typically caused by structural changes (e.g. cv3
+        # branch reconstruction during weight transfer). Fall back to non-quantized model.
+        LOGGER.warning(f"Failed to restore QAT quantization state: {e}. Loading model without quantization.")
 
 
 def model_info(model, detailed=False, verbose=True, imgsz=640):
